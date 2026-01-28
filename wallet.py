@@ -14,7 +14,7 @@ class Wallet:
         try:
             if account_type == "wallet":
                 # Update wallet balance
-                current_balance = self.db.get_user_balance(user_id)
+                current_balance = float(self.db.get_user_balance(user_id))
                 new_balance = current_balance + amount
 
                 if self.db.update_user_balance(user_id, new_balance):
@@ -47,7 +47,7 @@ class Wallet:
 
             elif account_type == "bank_account":
                 # Update bank account balance
-                current_balance = self.db.get_bank_account_balance(account_id)
+                current_balance = float(self.db.get_bank_account_balance(account_id))
                 new_balance = current_balance + amount
 
                 if self.db.update_bank_account_balance(account_id, new_balance):
@@ -63,7 +63,7 @@ class Wallet:
 
             elif account_type == "investment_account":
                 # Update investment account value
-                current_value = self.db.get_investment_account_value(account_id)
+                current_value = float(self.db.get_investment_account_value(account_id))
                 new_value = current_value + amount
 
                 if self.db.update_investment_account_value(account_id, new_value):
@@ -79,7 +79,7 @@ class Wallet:
 
             elif account_type == "manual_account":
                 # Update manual account balance
-                current_balance = self.db.get_manual_account_balance(account_id)
+                current_balance = float(self.db.get_manual_account_balance(account_id))
                 new_balance = current_balance + amount
 
                 if self.db.update_manual_account_balance(account_id, new_balance):

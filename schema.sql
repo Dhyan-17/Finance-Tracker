@@ -190,6 +190,17 @@ CREATE TABLE IF NOT EXISTS financial_goals (
     FOREIGN KEY (user_id) REFERENCES users(user_id) ON DELETE CASCADE
 );
 
+-- Goal contributions table
+CREATE TABLE IF NOT EXISTS goal_contributions (
+    contribution_id INT AUTO_INCREMENT PRIMARY KEY,
+    goal_id INT NOT NULL,
+    amount DECIMAL(10,2) NOT NULL,
+    category VARCHAR(100) NOT NULL, -- 'Monthly Savings', 'Business', 'Bonus', etc.
+    source VARCHAR(255), -- Description of where the money came from
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (goal_id) REFERENCES financial_goals(goal_id) ON DELETE CASCADE
+);
+
 -- Insert default admin
 INSERT IGNORE INTO admin (admin_id, name, password, email) VALUES
 (1000, 'System Admin', 'admin123', 'admin@wallet.com');

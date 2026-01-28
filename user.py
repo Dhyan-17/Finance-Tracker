@@ -2260,7 +2260,7 @@ class UserManager:
             print("+------------------------------------------------+")
 
     def update_goal_progress(self):
-        """Update progress on a financial goal"""
+        """Update progress on a financial goal with monthly savings check and business income option"""
         try:
             goals = self.db.get_user_financial_goals(self.logged_in_user_id)
 
@@ -2284,51 +2284,318 @@ class UserManager:
 
             selected_goal = goals[goal_choice - 1]
 
-            # Get amount to add
-            amount_to_add = self.validation.get_valid_float(
-                f"Enter amount to add to '{selected_goal['goal_name']}' (₹): ",
-                lambda x: x > 0,
-                "❌ Amount must be positive!"
+            print("+------------------------------------------------+")
+            print("| Update Goal Progress:                          |")
+            print("| 1. Add Monthly Savings                         |")
+            print("| 2. Add Income from Account                     |")
+            print("+------------------------------------------------+")
+
+            update_choice = self.validation.get_valid_int(
+                "Enter choice: ",
+                lambda x: x in [1, 2],
+                "❌ Invalid choice!"
             )
 
-            # Check if account has sufficient balance
-            if selected_goal['account_type'] == 'wallet':
-                current_balance = self.db.get_user_balance(self.logged_in_user_id)
-                if current_balance < amount_to_add:
-                    print("+------------------------------------------------+")
-                    print("| ❌ Insufficient wallet balance!               |")
-                    print("+------------------------------------------------+")
-                    return
-            # For bank and investment accounts, we assume they have balance
+            if update_choice == 1:  # Monthly Savings
+                # Check if account has sufficient balance for monthly savings
+                monthly_amount = selected_goal['monthly_savings']
 
-            # Confirm
-            if input(f"Confirm add ₹{amount_to_add:.2f} to goal? (y/n): ").lower() != 'y':
-                print("+------------------------------------------------+")
-                print("| ❌ Update cancelled.                           |")
-                print("+------------------------------------------------+")
-                return
-
-            # Update goal progress
-            result = self.db.update_goal_progress(selected_goal['goal_id'], amount_to_add)
-
-            if result:
-                print("+------------------------------------------------+")
-                print("| ✅ Goal Progress Updated Successfully!        |")
-                print("+------------------------------------------------+")
-
-                # Deduct from account if wallet
                 if selected_goal['account_type'] == 'wallet':
-                    new_balance = current_balance - amount_to_add
+                    current_balance = self.db.get_user_balance(self.logged_in_user_id)
+                    if current_balance < monthly_amount:
+                        print("+------------------------------------------------+")
+                        print("| ❌ Insufficient wallet balance for monthly savings! |")
+                        print(f"| Required: ₹{monthly_amount:<26.2f}|")
+                        print(f"| Available: ₹{current_balance:<25.2f}|")
+                        print("+------------------------------------------------+")
+
+                        # Automatically add 1 month to goal duration
+                        result = self.db.update_goal_months(selected_goal['goal_id'], 1)
+                        if result:
+                            print("| 📅 1 month automatically added to goal duration.|")
+                            print("+------------------------------------------------+")
+
+                            self.db.log_action(
+                                f"User:{self.logged_in_user}",
+                                f"Extended goal '{selected_goal['goal_name']}' by 1 month due to insufficient balance"
+                            )
+                        return
+
+                    # Deduct monthly savings from wallet
+                    new_balance = current_balance - monthly_amount
                     self.db.update_user_balance(self.logged_in_user_id, new_balance)
 
-                self.db.log_action(
-                    f"User:{self.logged_in_user}",
-                    f"Added ₹{amount_to_add} to goal: {selected_goal['goal_name']}"
+                elif selected_goal['account_type'] == 'bank':
+                    current_balance = self.db.get_bank_account_balance(selected_goal['account_id'])
+                    if current_balance < monthly_amount:
+                        print("+------------------------------------------------+")
+                        print("| ❌ Insufficient bank balance for monthly savings! |")
+                        print(f"| Required: ₹{monthly_amount:<26.2f}|")
+                        print(f"| Available: ₹{current_balance:<25.2f}|")
+                        print("+------------------------------------------------+")
+
+                        # Automatically add 1 month to goal duration
+                        result = self.db.update_goal_months(selected_goal['goal_id'], 1)
+                        if result:
+                            print("| 📅 1 month automatically added to goal duration.|")
+                            print("+------------------------------------------------+")
+
+                            self.db.log_action(
+                                f"User:{self.logged_in_user}",
+                                f"Extended goal '{selected_goal['goal_name']}' by 1 month due to insufficient balance"
+                            )
+                        return
+
+                    # Deduct from bank account
+                    new_balance = current_balance - monthly_amount
+                    self.db.update_bank_account_balance(selected_goal['account_id'], new_balance)
+
+                elif selected_goal['account_type'] == 'investment':
+                    current_balance = self.db.get_investment_account_value(selected_goal['account_id'])
+                    if current_balance < monthly_amount:
+                        print("+------------------------------------------------+")
+                        print("| ❌ Insufficient investment balance for monthly savings! |")
+                        print(f"| Required: ₹{monthly_amount:<26.2f}|")
+                        print(f"| Available: ₹{current_balance:<25.2f}|")
+                        print("+------------------------------------------------+")
+
+                        # Automatically add 1 month to goal duration
+                        result = self.db.update_goal_months(selected_goal['goal_id'], 1)
+                        if result:
+                            print("| 📅 1 month automatically added to goal duration.|")
+                            print("+------------------------------------------------+")
+
+                            self.db.log_action(
+                                f"User:{self.logged_in_user}",
+                                f"Extended goal '{selected_goal['goal_name']}' by 1 month due to insufficient balance"
+                            )
+                        return
+
+                    # Deduct from investment account
+                    new_balance = current_balance - monthly_amount
+                    self.db.update_investment_account_value(selected_goal['account_id'], new_balance)
+
+                # Add monthly savings to goal
+                result = self.db.update_goal_progress(selected_goal['goal_id'], monthly_amount)
+                if result:
+                    # Record the contribution
+                    self.db.add_goal_contribution(selected_goal['goal_id'], monthly_amount, "Monthly Savings", "Regular monthly contribution")
+
+                    print("+------------------------------------------------+")
+                    print("| ✅ Monthly savings added to goal!             |")
+                    print(f"| Amount: ₹{monthly_amount:<28.2f}|")
+                    print(f"| Date: {datetime.now().strftime('%Y-%m-%d %H:%M'):<20}|")
+                    print("+------------------------------------------------+")
+
+                    self.db.log_action(
+                        f"User:{self.logged_in_user}",
+                        f"Added monthly savings ₹{monthly_amount} to goal: {selected_goal['goal_name']}"
+                    )
+
+            elif update_choice == 2:  # Add Income from Account
+                # -------- SELECT ACCOUNT --------
+                accounts = {
+                    1: "Wallet",
+                    2: "Bank Account",
+                    3: "Investment Account",
+                    4: "Other"
+                }
+
+                print("+------------------------------------------------+")
+                print("| Select Account Source:                         |")
+                for k, v in accounts.items():
+                    print(f"| {k}. {v:<38}|")
+                print("+------------------------------------------------+")
+
+                acc_choice = self.validation.get_valid_int(
+                    "Enter choice: ",
+                    lambda x: x in accounts,
+                    "❌ Invalid account selection!"
                 )
-            else:
+                selected_account = accounts[acc_choice]
+
+                # -------- SELECT SPECIFIC ACCOUNT IF BANK/INVESTMENT/OTHER --------
+                account_id = None
+                if acc_choice == 2:  # Bank Account
+                    bank_accounts = self.db.get_user_bank_accounts(self.logged_in_user_id)
+                    if not bank_accounts:
+                        print("+------------------------------------------------+")
+                        print("| ❌ No bank accounts found! Please add a bank account first. |")
+                        print("+------------------------------------------------+")
+                        return
+
+                    print("+------------------------------------------------+")
+                    print("| Select Bank Account:                           |")
+                    for i, acc in enumerate(bank_accounts, 1):
+                        print(f"| {i}. {acc['bank_name']} - {acc['last_four_digits']:<10} |")
+                    print("+------------------------------------------------+")
+
+                    acc_idx = self.validation.get_valid_int(
+                        "Enter choice: ",
+                        lambda x: 1 <= x <= len(bank_accounts),
+                        "❌ Invalid account selection!"
+                    )
+                    account_id = bank_accounts[acc_idx - 1]['account_id']
+
+                elif acc_choice == 3:  # Investment Account
+                    invest_accounts = self.db.get_user_investment_accounts(self.logged_in_user_id)
+                    if not invest_accounts:
+                        print("+------------------------------------------------+")
+                        print("| ❌ No investment accounts found! Please add an investment account first. |")
+                        print("+------------------------------------------------+")
+                        return
+
+                    print("+------------------------------------------------+")
+                    print("| Select Investment Account:                     |")
+                    for i, acc in enumerate(invest_accounts, 1):
+                        print(f"| {i}. {acc['investment_name']} ({acc['investment_type']}) |")
+                    print("+------------------------------------------------+")
+
+                    acc_idx = self.validation.get_valid_int(
+                        "Enter choice: ",
+                        lambda x: 1 <= x <= len(invest_accounts),
+                        "❌ Invalid account selection!"
+                    )
+                    account_id = invest_accounts[acc_idx - 1]['investment_id']
+
+                elif acc_choice == 4:  # Other (Manual Account)
+                    manual_accounts = self.db.get_user_manual_accounts(self.logged_in_user_id)
+
+                    print("+------------------------------------------------+")
+                    print("| Select Manual Account:                         |")
+                    print("| 1. Create New Manual Account                  |")
+
+                    if manual_accounts:
+                        for i, acc in enumerate(manual_accounts, 2):
+                            print(f"| {i}. {acc['account_name']} (₹{acc['balance']:.2f}) |")
+                    print("+------------------------------------------------+")
+
+                    max_choice = len(manual_accounts) + 1 if manual_accounts else 1
+                    acc_choice_manual = self.validation.get_valid_int(
+                        "Enter choice: ",
+                        lambda x: 1 <= x <= max_choice,
+                        "❌ Invalid account selection!"
+                    )
+
+                    if acc_choice_manual == 1:
+                        # Create new manual account
+                        account_name = self.validation.get_valid_input(
+                            "Enter Account Name: ",
+                            lambda x: len(x.strip()) > 0,
+                            "❌ Account name cannot be empty!"
+                        ).strip()
+
+                        opening_balance = 0.00  # Start with zero for new accounts
+
+                        notes = self.validation.get_valid_input(
+                            "Enter Notes (optional, press enter to skip): ",
+                            lambda x: True,
+                            ""
+                        ).strip()
+
+                        result = self.db.add_manual_account(
+                            self.logged_in_user_id,
+                            account_name,
+                            opening_balance,
+                            notes
+                        )
+
+                        if result:
+                            account_id = result
+                            print("+------------------------------------------------+")
+                            print("| ✅ Manual Account Created Successfully!       |")
+                            print("+------------------------------------------------+")
+                        else:
+                            print("+------------------------------------------------+")
+                            print("| ❌ Failed to create manual account!           |")
+                            print("+------------------------------------------------+")
+                            return
+                    else:
+                        # Select existing account (choice 2, 3, etc. map to index 0, 1, etc.)
+                        account_id = manual_accounts[acc_choice_manual - 2]['manual_account_id']
+
+                # -------- AMOUNT --------
+                amount_to_add = self.validation.get_valid_float(
+                    "Enter amount to add to goal (₹): ",
+                    lambda x: x > 0,
+                    "❌ Amount must be positive!"
+                )
+
+                # -------- NOTE / SOURCE --------
+                source = self.validation.get_valid_input(
+                    "Enter Source / Note: ",
+                    lambda x: len(x.strip()) > 0,
+                    "❌ Source cannot be empty!"
+                )
+
+                # Use default category for goal contributions
+                selected_category = "Business Income"
+
+                # -------- CONFIRM --------
                 print("+------------------------------------------------+")
-                print("| ❌ Failed to update goal progress!            |")
+                if acc_choice == 4:  # Manual Account
+                    manual_accounts = self.db.get_user_manual_accounts(self.logged_in_user_id)
+                    selected_manual = next((acc for acc in manual_accounts if acc['manual_account_id'] == account_id), None)
+                    if selected_manual:
+                        print(f"| Account  : {selected_manual['account_name']:<30}|")
+                    else:
+                        print(f"| Account  : Manual Account (ID: {account_id})")
+                else:
+                    print(f"| Account  : {selected_account:<30}|")
+                print(f"| Category : {selected_category:<30}|")
+                print(f"| Amount   : ₹{amount_to_add:<28.2f}|")
+                print(f"| Note     : {source:<30}|")
                 print("+------------------------------------------------+")
+
+                if input("Confirm add this income to goal? (y/n): ").lower() != 'y':
+                    print("+------------------------------------------------+")
+                    print("| ❌ Update cancelled.                           |")
+                    print("+------------------------------------------------+")
+                    return
+
+                # -------- DELEGATE TO WALLET --------
+                account_type = selected_account.lower().replace(" ", "_")
+                if acc_choice == 4:  # Manual Account
+                    account_type = "manual_account"
+
+                success, new_balance, message = self.wallet.process_income(
+                    self.logged_in_user_id,
+                    account_type,
+                    account_id,
+                    amount_to_add,
+                    selected_category,
+                    source,
+                    self.logged_in_user
+                )
+
+                if success:
+                    # Update goal progress
+                    result = self.db.update_goal_progress(selected_goal['goal_id'], amount_to_add)
+
+                    if result:
+                        # Record the contribution
+                        self.db.add_goal_contribution(selected_goal['goal_id'], amount_to_add, selected_category, source)
+
+                        print("+------------------------------------------------+")
+                        print("| ✅ Income added to goal successfully!         |")
+                        print(f"| Amount: ₹{amount_to_add:<28.2f}|")
+                        print(f"| Category: {selected_category:<26}|")
+                        print(f"| Source: {source:<28}|")
+                        print(f"| Date: {datetime.now().strftime('%Y-%m-%d %H:%M'):<20}|")
+                        print("+------------------------------------------------+")
+
+                        self.db.log_action(
+                            f"User:{self.logged_in_user}",
+                            f"Added {selected_category} ₹{amount_to_add} to goal: {selected_goal['goal_name']}"
+                        )
+                    else:
+                        print("+------------------------------------------------+")
+                        print("| ❌ Failed to update goal progress!            |")
+                        print("+------------------------------------------------+")
+                else:
+                    print("+------------------------------------------------+")
+                    print(f"| ❌ {message:<45}|")
+                    print("+------------------------------------------------+")
 
         except Exception as e:
             print("+------------------------------------------------+")
@@ -2336,20 +2603,21 @@ class UserManager:
             print("+------------------------------------------------+")
 
     def stop_financial_goal(self):
-        """Stop or cancel a financial goal"""
+        """Stop or reactivate a financial goal"""
         try:
             goals = self.db.get_user_financial_goals(self.logged_in_user_id)
 
             if not goals:
                 print("+------------------------------------------------+")
-                print("| ❌ No active goals found!                      |")
+                print("| ❌ No goals found!                             |")
                 print("+------------------------------------------------+")
                 return
 
             print("+------------------------------------------------+")
-            print("| Select Goal to Stop:                           |")
+            print("| Select Goal to Manage:                         |")
             for i, goal in enumerate(goals, 1):
-                print(f"| {i}. {goal['goal_name']:<35}|")
+                status_indicator = "🟢" if goal['status'] == 'ACTIVE' else "🔴"
+                print(f"| {i}. {status_indicator} {goal['goal_name']:<32}|")
             print("+------------------------------------------------+")
 
             goal_choice = self.validation.get_valid_int(
@@ -2360,31 +2628,57 @@ class UserManager:
 
             selected_goal = goals[goal_choice - 1]
 
-            # Confirm
-            if input(f"Confirm stop goal '{selected_goal['goal_name']}'? (y/n): ").lower() != 'y':
-                print("+------------------------------------------------+")
-                print("| ❌ Operation cancelled.                        |")
-                print("+------------------------------------------------+")
-                return
+            # Check if goal is already stopped
+            if selected_goal['status'] == 'STOPPED':
+                # Offer to reactivate
+                if input(f"Goal '{selected_goal['goal_name']}' is stopped. Reactivate it? (y/n): ").lower() != 'y':
+                    print("+------------------------------------------------+")
+                    print("| ❌ Operation cancelled.                        |")
+                    print("+------------------------------------------------+")
+                    return
 
-            # Stop goal
-            result = self.db.stop_financial_goal(selected_goal['goal_id'])
+                # Reactivate goal
+                result = self.db.reactivate_financial_goal(selected_goal['goal_id'])
 
-            if result:
-                print("+------------------------------------------------+")
-                print("| ✅ Goal Stopped Successfully!                 |")
-                print("+------------------------------------------------+")
+                if result:
+                    print("+------------------------------------------------+")
+                    print("| ✅ Goal Reactivated Successfully!             |")
+                    print("+------------------------------------------------+")
 
-                self.db.log_action(
-                    f"User:{self.logged_in_user}",
-                    f"Stopped goal: {selected_goal['goal_name']}"
-                )
+                    self.db.log_action(
+                        f"User:{self.logged_in_user}",
+                        f"Reactivated goal: {selected_goal['goal_name']}"
+                    )
+                else:
+                    print("+------------------------------------------------+")
+                    print("| ❌ Failed to reactivate goal!                  |")
+                    print("+------------------------------------------------+")
             else:
-                print("+------------------------------------------------+")
-                print("| ❌ Failed to stop goal!                        |")
-                print("+------------------------------------------------+")
+                # Stop active goal
+                if input(f"Confirm stop goal '{selected_goal['goal_name']}'? (y/n): ").lower() != 'y':
+                    print("+------------------------------------------------+")
+                    print("| ❌ Operation cancelled.                        |")
+                    print("+------------------------------------------------+")
+                    return
+
+                # Stop goal
+                result = self.db.stop_financial_goal(selected_goal['goal_id'])
+
+                if result:
+                    print("+------------------------------------------------+")
+                    print("| ✅ Goal Stopped Successfully!                 |")
+                    print("+------------------------------------------------+")
+
+                    self.db.log_action(
+                        f"User:{self.logged_in_user}",
+                        f"Stopped goal: {selected_goal['goal_name']}"
+                    )
+                else:
+                    print("+------------------------------------------------+")
+                    print("| ❌ Failed to stop goal!                        |")
+                    print("+------------------------------------------------+")
 
         except Exception as e:
             print("+------------------------------------------------+")
-            print(f"| ❌ Error stopping goal: {str(e)[:25]:<25}|")
+            print(f"| ❌ Error managing goal: {str(e)[:25]:<25}|")
             print("+------------------------------------------------+")

@@ -341,9 +341,28 @@ class Database:
         query = "UPDATE financial_goals SET current_savings = %s WHERE goal_id = %s"
         return self.execute_query(query, (new_savings, goal_id))
 
+    def add_goal_contribution(self, goal_id, amount, category, source):
+        """Add a contribution record to a financial goal"""
+        query = """
+            INSERT INTO goal_contributions
+            (goal_id, amount, category, source)
+            VALUES (%s, %s, %s, %s)
+        """
+        return self.execute_insert(query, (goal_id, amount, category, source))
+
+    def update_goal_months(self, goal_id, additional_months):
+        """Add months to a financial goal"""
+        query = "UPDATE financial_goals SET months_to_achieve = months_to_achieve + %s WHERE goal_id = %s"
+        return self.execute_query(query, (additional_months, goal_id))
+
     def stop_financial_goal(self, goal_id):
         """Stop a financial goal"""
         query = "UPDATE financial_goals SET status = 'STOPPED' WHERE goal_id = %s"
+        return self.execute_query(query, (goal_id,))
+
+    def reactivate_financial_goal(self, goal_id):
+        """Reactivate a stopped financial goal"""
+        query = "UPDATE financial_goals SET status = 'ACTIVE' WHERE goal_id = %s"
         return self.execute_query(query, (goal_id,))
 
     def get_user_transaction_history(self, user_id, limit=50):
