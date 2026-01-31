@@ -65,6 +65,8 @@ class Database:
                 if statement:
                     cursor.execute(statement)
 
+
+
             self.connection.commit()
             cursor.close()
             print("✅ Database tables created/verified successfully!")
@@ -204,14 +206,14 @@ class Database:
         result = self.execute_query(query, (user_id,), fetch=True)
         return result[0]['total_balance'] if result and result[0]['total_balance'] else 0.0
 
-    def add_investment_account(self, user_id, investment_name, investment_type, platform, invested_amount, current_value):
+    def add_investment_account(self, user_id, investment_name, investment_type, platform, invested_amount, current_value, quantity, price_per_share):
         """Add a new investment account for the user"""
         query = """
             INSERT INTO investment_accounts
-            (user_id, investment_name, investment_type, platform, invested_amount, current_value)
-            VALUES (%s, %s, %s, %s, %s, %s)
+            (user_id, investment_name, investment_type, platform, invested_amount, current_value, quantity, price_per_share)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
         """
-        return self.execute_insert(query, (user_id, investment_name, investment_type, platform, invested_amount, current_value))
+        return self.execute_insert(query, (user_id, investment_name, investment_type, platform, invested_amount, current_value, quantity, price_per_share))
 
     def get_user_investment_accounts(self, user_id):
         """Get all investment accounts for a user"""
@@ -313,6 +315,11 @@ class Database:
         query = "UPDATE investment_accounts SET current_value = %s WHERE investment_id = %s"
         return self.execute_query(query, (new_value, account_id))
 
+    def remove_investment_account(self, investment_id):
+        """Remove an investment account"""
+        query = "DELETE FROM investment_accounts WHERE investment_id = %s"
+        return self.execute_query(query, (investment_id,))
+
     def add_investment_transaction(self, account_id, txn_type, amount, value_after, category, source):
         """Add transaction record for investment account"""
         query = """
@@ -365,10 +372,19 @@ class Database:
         query = "UPDATE financial_goals SET status = 'ACTIVE' WHERE goal_id = %s"
         return self.execute_query(query, (goal_id,))
 
-    def get_user_transaction_history(self, user_id, limit=50):
+    def get_user_transaction_history(self, user_id, date_filter=None, limit=50):
         """Get recent transaction history for a user across all account types"""
         # This is a complex query that combines transactions from all account types
-        query = """
+
+        # Build date condition based on filter
+        date_condition = ""
+        if date_filter:
+            if len(date_filter) == 7:  # YYYY-MM format
+                date_condition = f"AND DATE_FORMAT(date, '%Y-%m') = '{date_filter}'"
+            elif len(date_filter) == 4:  # YYYY format
+                date_condition = f"AND YEAR(date) = {date_filter}"
+
+        query = f"""
             SELECT
                 'wallet' as account_type,
                 wt.txn_id as transaction_id,
@@ -380,7 +396,7 @@ class Database:
                 NULL as category,
                 NULL as source
             FROM wallet_transactions wt
-            WHERE wt.user_id = %s
+            WHERE wt.user_id = %s {date_condition}
 
             UNION ALL
 
@@ -396,7 +412,7 @@ class Database:
                 bt.source
             FROM bank_transactions bt
             JOIN bank_accounts ba ON bt.account_id = ba.account_id
-            WHERE ba.user_id = %s
+            WHERE ba.user_id = %s {date_condition}
 
             UNION ALL
 
@@ -412,7 +428,7 @@ class Database:
                 it.source
             FROM investment_transactions it
             JOIN investment_accounts ia ON it.account_id = ia.investment_id
-            WHERE ia.user_id = %s
+            WHERE ia.user_id = %s {date_condition}
 
             UNION ALL
 
@@ -428,7 +444,7 @@ class Database:
                 mat.source
             FROM manual_account_transactions mat
             JOIN manual_accounts ma ON mat.account_id = ma.manual_account_id
-            WHERE ma.user_id = %s
+            WHERE ma.user_id = %s {date_condition}
 
             ORDER BY date DESC
             LIMIT %s

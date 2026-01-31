@@ -104,11 +104,17 @@ CREATE TABLE IF NOT EXISTS investment_accounts (
     investment_name VARCHAR(100),
     investment_type VARCHAR(50),   -- Stock / MF / Crypto / FD
     platform VARCHAR(100),          -- Zerodha, Groww, Coin, Bank
+    quantity DECIMAL(10,4) DEFAULT 0,  -- Number of shares/units
+    price_per_share DECIMAL(10,2) DEFAULT 0,  -- Price per share/unit at purchase
     invested_amount DECIMAL(10,2),
     current_value DECIMAL(10,2),
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     FOREIGN KEY (user_id) REFERENCES users(user_id) ON DELETE CASCADE
 );
+
+-- Ensure columns exist (for backward compatibility)
+ALTER TABLE investment_accounts ADD COLUMN IF NOT EXISTS quantity DECIMAL(10,4) DEFAULT 0;
+ALTER TABLE investment_accounts ADD COLUMN IF NOT EXISTS price_per_share DECIMAL(10,2) DEFAULT 0;
 
 -- Imported transactions table
 CREATE TABLE IF NOT EXISTS imported_transactions (

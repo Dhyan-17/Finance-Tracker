@@ -1,9 +1,12 @@
 import re
 import hashlib
-from datetime import datetime, date
+import requests
+from datetime import datetime, date, timedelta
 from validations import Validation
 from stack_queue_utils import StackQueueManager
 from wallet import Wallet
+import time, os, random
+import requests
 
 class UserManager:
     def __init__(self, db):
@@ -276,6 +279,8 @@ class UserManager:
             print("| Case 1 | Bank Account Sync                    |")
             print("| Case 2 | Investment Account Setup             |")
             print("| Case 3 | Manual Account Setup                 |")
+            print("| Case 4 | View Investment Performance          |")
+            print("| Case 5 | Sell/Remove Investment Account       |")
             print("| Case 0 | Back                                 |")
             print("+-----------------------------------------------+")
             print("👉 Enter your choice: ", end="")
@@ -294,6 +299,10 @@ class UserManager:
                 self.investment_account_setup() # 🔜 later
             elif choice == 3:
                 self.manual_account_setup()     # 🔜 later
+            elif choice == 4:
+                self.display_investment_performance_live()
+            elif choice == 5:
+                self.sell_remove_investment_account()
             elif choice == 0:
                 break
             else:
@@ -540,19 +549,89 @@ class UserManager:
                     "❌ Platform name cannot be empty!"
                 ).strip()
 
-            # -------- INVESTED AMOUNT --------
-            invested_amount = self.validation.get_valid_float(
-                "Enter Invested Amount (₹): ",
-                lambda x: x >= 0,
-                "❌ Invested amount cannot be negative!"
-            )
+            # -------- QUANTITY AND PRICE --------
+            if investment_type in ['Stock', 'Crypto']:
+                # Symbol mapping for API calls
+                symbol_map = {
+                    "TCS Share": "TCS.NS",
+                    "Reliance Share": "RELIANCE.NS",
+                    "Infosys Share": "INFY.NS",
+                    "Bitcoin": "BTC",
+                    "Ethereum": "ETH",
+                    "Solana": "SOL"
+                }
 
-            # -------- CURRENT VALUE --------
-            current_value = self.validation.get_valid_float(
-                "Enter Current Value (₹): ",
-                lambda x: x >= 0,
-                "❌ Current value cannot be negative!"
-            )
+                # Get real-time price from API first
+                symbol = symbol_map.get(investment_name, "")
+                current_price = None
+
+                if symbol:
+                    try:
+                        function = "DIGITAL_CURRENCY_DAILY" if investment_type == 'Crypto' else "TIME_SERIES_DAILY"
+                        url = f"https://www.alphavantage.co/query?function={function}&symbol={symbol}&market=USD&apikey=demo"
+
+                        response = requests.get(url, timeout=10)
+                        data = response.json()
+
+                        if 'Time Series (Daily)' in data or 'Time Series (Digital Currency Daily)' in data:
+                            time_series_key = 'Time Series (Digital Currency Daily)' if investment_type == 'Crypto' else 'Time Series (Daily)'
+                            dates = list(data[time_series_key].keys())
+                            latest_date = max(dates)
+                            latest_data = data[time_series_key][latest_date]
+
+                            if investment_type == 'Crypto':
+                                current_price = float(latest_data['4a. close (USD)'])
+                            else:
+                                current_price = float(latest_data['4. close'])
+
+                            print("+-----------------------------------------------+")
+                            print(f"| Current Price: ₹{current_price:.2f} per share/unit |")
+                            print("+-----------------------------------------------+")
+                        else:
+                            print("+-----------------------------------------------+")
+                            print("| ⚠️  Could not fetch real-time price. Using manual entry. |")
+                            print("+-----------------------------------------------+")
+                    except Exception as e:
+                        print("+-----------------------------------------------+")
+                        print("| ⚠️  API Error. Using manual entry.             |")
+                        print("+-----------------------------------------------+")
+
+                if current_price is None:
+                    # Manual entry if API fails or symbol not found
+                    current_price = self.validation.get_valid_float(
+                        "Enter Current Price per Share/Unit (₹): ",
+                        lambda x: x > 0,
+                        "❌ Price must be positive!"
+                    )
+
+                # Now ask for quantity
+                quantity = self.validation.get_valid_float(
+                    "Enter Quantity (number of shares/units): ",
+                    lambda x: x > 0,
+                    "❌ Quantity must be positive!"
+                )
+
+                # Calculate amounts
+                price_per_share = current_price
+                invested_amount = quantity * current_price
+                current_value = invested_amount
+
+                print("+-----------------------------------------------+")
+                print(f"| Quantity: {quantity:.0f} shares/units |")
+                print(f"| Price per Share/Unit: ₹{price_per_share:.2f} |")
+                print(f"| Total Invested: ₹{invested_amount:.2f} |")
+                print("+-----------------------------------------------+")
+            else:
+                # For Mutual Funds and other investments
+                quantity = 1  # Default for non-stock investments
+                price_per_share = 0  # Not applicable
+
+                invested_amount = self.validation.get_valid_float(
+                    "Enter Invested Amount (₹): ",
+                    lambda x: x >= 0,
+                    "❌ Invested amount cannot be negative!"
+                )
+                current_value = invested_amount
 
             # -------- CONFIRM --------
             print("+-----------------------------------------------+")
@@ -577,7 +656,9 @@ class UserManager:
                 investment_type,
                 platform,
                 invested_amount,
-                current_value
+                current_value,
+                quantity,
+                price_per_share
             )
 
             if result:
@@ -599,6 +680,242 @@ class UserManager:
             print("+-----------------------------------------------+")
             print(f"| ❌ Error: {str(e)[:38]:<38}|")
             print("+-----------------------------------------------+")
+
+    def display_investment_performance_live(self):
+
+        investments = self.db.get_user_investment_accounts(self.logged_in_user_id)
+
+        if not investments:
+            print("No investments found")
+            return
+
+        # memory copy
+        live_vals = {
+            inv['investment_id']: float(inv['current_value'])
+            for inv in investments
+        }
+
+        try:
+            while True:
+                os.system('cls' if os.name == 'nt' else 'clear')
+
+                print("=== LIVE PORTFOLIO (Ctrl+C to save) ===")
+
+                total_i = 0
+                total_c = 0
+
+                for inv in investments:
+                    iid = inv['investment_id']
+                    invested = float(inv['invested_amount'])
+
+                    # 🔥 bounded fluctuation
+                    pct = random.uniform(-0.05, 0.05)
+
+                    # min move 0.15%
+                    if abs(pct) < 0.0015:
+                        pct = 0.0015 if pct > 0 else -0.0015
+
+                    live_vals[iid] *= (1 + pct)
+
+                    curr = live_vals[iid]
+                    pl = curr - invested
+                    p = (pl / invested * 100) if invested > 0 else 0
+
+                    total_i += invested
+                    total_c += curr
+
+                    print(f"{inv['investment_name']}: ₹{curr:.2f}  P/L {p:.2f}%")
+
+                print("\nPortfolio:",
+                    f"₹{total_c-total_i:.2f}",
+                    f"({(total_c-total_i)/total_i*100:.2f}%)")
+
+                time.sleep(1)
+
+        except KeyboardInterrupt:
+            print("\nSaving values to DB...")
+
+            for iid, val in live_vals.items():
+                self.db.update_investment_account_value(iid, val)
+
+            print("✅ Saved.")
+
+    def reset_investment_values_to_invested(self):
+        """Reset all investment current values to their invested amounts"""
+        try:
+            investments = self.db.get_user_investment_accounts(self.logged_in_user_id)
+
+            if not investments:
+                print("+------------------------------------------------+")
+                print("| No investments found to reset.                 |")
+                print("+------------------------------------------------+")
+                return
+
+            for inv in investments:
+                invested_amount = inv['invested_amount']
+                self.db.update_investment_account_value(inv['investment_id'], invested_amount)
+
+            print("+------------------------------------------------+")
+            print("| ✅ All investment values reset to invested amounts! |")
+            print("+------------------------------------------------+")
+
+        except Exception as e:
+            print("+------------------------------------------------+")
+            print(f"| ❌ Error resetting investment values: {str(e)[:15]:<15}|")
+            print("+------------------------------------------------+")
+
+    def get_live_or_simulated_price(self, inv):
+
+        API_KEY = "demo"
+
+        symbol_map = {
+            "TCS Share": "TCS.NS",
+            "Reliance Share": "RELIANCE.NS",
+            "Infosys Share": "INFY.NS",
+            "Bitcoin": "BTC",
+            "Ethereum": "ETH",
+            "Solana": "SOL"
+        }
+
+        invested_amount = inv['invested_amount']
+        quantity = inv.get('quantity', 1)
+
+        # ✅ Try API if mapped
+        if inv['investment_name'] in symbol_map:
+            try:
+                symbol = symbol_map[inv['investment_name']]
+                url = f"https://www.alphavantage.co/query?function=TIME_SERIES_DAILY&symbol={symbol}&apikey={API_KEY}"
+
+                r = requests.get(url, timeout=5)
+                data = r.json()
+
+                ts = data.get("Time Series (Daily)")
+                if ts:
+                    latest = ts[max(ts.keys())]
+                    price = float(latest["4. close"])
+                    return quantity * price
+            except:
+                pass
+
+        # ✅ Fallback simulation
+        change_pct = random.uniform(-0.05, 0.05)
+        return invested_amount * (1 + change_pct)
+
+
+    def sell_remove_investment_account(self):
+        """Sell/Remove investment account and credit proceeds to wallet"""
+        try:
+            investments = self.db.get_user_investment_accounts(self.logged_in_user_id)
+
+            if not investments:
+                print("+-----------------------------------------------+")
+                print("| ❌ No investment accounts found!              |")
+                print("+-----------------------------------------------+")
+                return
+
+            print("+-----------------------------------------------+")
+            print("| Select Investment Account to Sell/Remove:     |")
+            for i, inv in enumerate(investments, 1):
+                print(f"| {i}. {inv['investment_name']} ({inv['investment_type']}) |")
+                print(f"|    Current Value: ₹{inv['current_value']:.2f} |")
+            print("+-----------------------------------------------+")
+
+            choice = self.validation.get_valid_int(
+                "Enter choice: ",
+                lambda x: 1 <= x <= len(investments),
+                "❌ Invalid investment selection!"
+            )
+
+            selected_investment = investments[choice - 1]
+            current_value = selected_investment['current_value']
+
+            print("+-----------------------------------------------+")
+            print(f"| Investment: {selected_investment['investment_name']:<25}|")
+            print(f"| Type: {selected_investment['investment_type']:<25}|")
+            print(f"| Current Value: ₹{current_value:<23.2f}|")
+            print("+-----------------------------------------------+")
+
+            confirm = input("Confirm sell/remove this investment? (y/n): ").lower().strip()
+            if confirm != 'y':
+                print("+-----------------------------------------------+")
+                print("| ❌ Operation cancelled.                       |")
+                print("+-----------------------------------------------+")
+                return
+
+            # Add proceeds to wallet
+            current_wallet_balance = self.db.get_user_balance(self.logged_in_user_id)
+            new_wallet_balance = current_wallet_balance + current_value
+            self.db.update_user_balance(self.logged_in_user_id, new_wallet_balance)
+
+            # Remove investment account
+            result = self.db.remove_investment_account(selected_investment['investment_id'])
+
+            if result:
+                print("+-----------------------------------------------+")
+                print("| ✅ Investment sold/removed successfully!      |")
+                print(f"| Proceeds added to wallet: ₹{current_value:<12.2f}|")
+                print(f"| New wallet balance: ₹{new_wallet_balance:<12.2f}|")
+                print("+-----------------------------------------------+")
+
+                # Log action
+                self.db.log_action(
+                    f"User:{self.logged_in_user}",
+                    f"Sold/removed investment: {selected_investment['investment_name']} (₹{current_value})"
+                )
+            else:
+                print("+-----------------------------------------------+")
+                print("| ❌ Failed to sell/remove investment!          |")
+                print("+-----------------------------------------------+")
+
+        except Exception as e:
+            print("+-----------------------------------------------+")
+            print(f"| ❌ Error selling/removing investment: {str(e)[:15]:<15}|")
+            print("+-----------------------------------------------+")
+
+    def update_investment_values_real_time(self):
+        """Update investment values with random real-time fluctuations (0.1% to 0.12% up)"""
+        try:
+            investments = self.db.get_user_investment_accounts(self.logged_in_user_id)
+
+            if not investments:
+                return
+
+            import random
+
+            for inv in investments:
+                current_value = inv['current_value']
+                invested_amount = inv['invested_amount']
+
+                # Apply 0.1% to 0.12% random fluctuation (always positive)
+                change_pct = random.uniform(0.001, 0.0012)  # 0.1% to 0.12%
+
+                # Calculate new value
+                new_value = current_value * (1 + change_pct)
+
+                # Ensure minimum value (can't go below 10% of invested amount)
+                min_value = invested_amount * 0.1
+                new_value = max(new_value, min_value)
+
+                # Update in database
+                self.db.update_investment_account_value(inv['investment_id'], new_value)
+
+        except Exception as e:
+            # Silently handle errors to avoid disrupting user experience
+            pass
+
+    def update_investment_values_once(self):
+        investments = self.db.get_user_investment_accounts(self.logged_in_user_id)
+
+        for inv in investments:
+            new_value = self.get_live_or_simulated_price(inv)
+
+            min_value = inv['invested_amount'] * 0.1
+            new_value = max(new_value, min_value)
+
+            self.db.update_investment_account_value(
+                inv['investment_id'],
+                new_value
+            )
 
     def import_transactions_file(self):
         """Import transactions from CSV file"""
@@ -1022,7 +1339,8 @@ class UserManager:
                 1: "Wallet",
                 2: "Bank Account",
                 3: "Investment Account",
-                4: "Other"
+                4: "Other",
+                5: "Add Investment Account"
             }
 
             print("+-----------------------------------------------+")
@@ -1036,7 +1354,14 @@ class UserManager:
                 lambda x: x in accounts,
                 "❌ Invalid account selection!"
             )
+
+            # Handle investment account setup
+            if acc_choice == 5:
+                self.investment_account_setup()
+                return
+
             selected_account = accounts[acc_choice]
+            account_id = None
 
             # -------- DETERMINE TRANSACTION TYPE --------
             if acc_choice == 3:  # Investment Account
@@ -1056,12 +1381,127 @@ class UserManager:
             print(f"|               {transaction_type:<29}|")
             print("+-----------------------------------------------+")
 
+            # -------- SELECT SPECIFIC ACCOUNT IF BANK/INVESTMENT/OTHER --------
+            if acc_choice == 2:  # Bank Account
+                bank_accounts = self.db.get_user_bank_accounts(self.logged_in_user_id)
+                if not bank_accounts:
+                    print("+-----------------------------------------------+")
+                    print("| ❌ No bank accounts found! Please add a bank account first. |")
+                    print("+-----------------------------------------------+")
+                    return
+
+                print("+-----------------------------------------------+")
+                print("| Select Bank Account:                           |")
+                for i, acc in enumerate(bank_accounts, 1):
+                    print(f"| {i}. {acc['bank_name']} - {acc['last_four_digits']:<10} |")
+                print("+-----------------------------------------------+")
+
+                acc_idx = self.validation.get_valid_int(
+                    "Enter choice: ",
+                    lambda x: 1 <= x <= len(bank_accounts),
+                    "❌ Invalid account selection!"
+                )
+                selected_bank = bank_accounts[acc_idx - 1]
+                account_id = selected_bank['account_id']
+
+                # Display balance
+                balance = self.db.get_bank_account_balance(account_id)
+                print("+-----------------------------------------------+")
+                print(f"| Account Balance: ₹{balance:<26.2f}|")
+                print("+-----------------------------------------------+")
+
+            elif acc_choice == 3:  # Investment Account
+                invest_accounts = self.db.get_user_investment_accounts(self.logged_in_user_id)
+                if not invest_accounts:
+                    print("+-----------------------------------------------+")
+                    print("| ❌ No investment accounts found! Please add an investment account first. |")
+                    print("+-----------------------------------------------+")
+                    return
+
+                print("+-----------------------------------------------+")
+                print("| Select Investment Account:                     |")
+                for i, acc in enumerate(invest_accounts, 1):
+                    print(f"| {i}. {acc['investment_name']} ({acc['investment_type']}) |")
+                print("+-----------------------------------------------+")
+
+                acc_idx = self.validation.get_valid_int(
+                    "Enter choice: ",
+                    lambda x: 1 <= x <= len(invest_accounts),
+                    "❌ Invalid account selection!"
+                )
+                account_id = invest_accounts[acc_idx - 1]['investment_id']
+
+            elif acc_choice == 4:  # Other (Manual Account)
+                manual_accounts = self.db.get_user_manual_accounts(self.logged_in_user_id)
+
+                print("+-----------------------------------------------+")
+                print("| Select Manual Account:                         |")
+                print("| 1. Create New Manual Account                  |")
+
+                if manual_accounts:
+                    for i, acc in enumerate(manual_accounts, 2):
+                        print(f"| {i}. {acc['account_name']} (₹{acc['balance']:.2f}) |")
+                print("+-----------------------------------------------+")
+
+                max_choice = len(manual_accounts) + 1 if manual_accounts else 1
+                acc_choice_manual = self.validation.get_valid_int(
+                    "Enter choice: ",
+                    lambda x: 1 <= x <= max_choice,
+                    "❌ Invalid account selection!"
+                )
+
+                if acc_choice_manual == 1:
+                    # Create new manual account
+                    account_name = self.validation.get_valid_input(
+                        "Enter Account Name: ",
+                        lambda x: len(x.strip()) > 0,
+                        "❌ Account name cannot be empty!"
+                    ).strip()
+
+                    opening_balance = 0.00  # Start with zero for new accounts
+
+                    notes = self.validation.get_valid_input(
+                        "Enter Notes (optional, press enter to skip): ",
+                        lambda x: True,
+                        ""
+                    ).strip()
+
+                    result = self.db.add_manual_account(
+                        self.logged_in_user_id,
+                        account_name,
+                        opening_balance,
+                        notes
+                    )
+
+                    if result:
+                        account_id = result
+                        print("+-----------------------------------------------+")
+                        print("| ✅ Manual Account Created Successfully!       |")
+                        print("+-----------------------------------------------+")
+                    else:
+                        print("+-----------------------------------------------+")
+                        print("| ❌ Failed to create manual account!           |")
+                        print("+-----------------------------------------------+")
+                        return
+                else:
+                    # Select existing account (choice 2, 3, etc. map to index 0, 1, etc.)
+                    account_id = manual_accounts[acc_choice_manual - 2]['manual_account_id']
+
             # -------- AMOUNT --------
             amount = self.validation.get_valid_float(
                 f"Enter {amount_label}: ",
                 lambda x: x > 0,
                 "❌ Amount must be positive!"
             )
+
+            # -------- CHECK BALANCE FOR BANK ACCOUNT --------
+            if acc_choice == 2:  # Bank Account
+                balance = self.db.get_bank_account_balance(account_id)
+                if amount > balance:
+                    print("+-----------------------------------------------+")
+                    print("| ❌ Insufficient balance!                      |")
+                    print("+-----------------------------------------------+")
+                    return
 
             # -------- CATEGORY --------
             categories = {
@@ -1092,9 +1532,39 @@ class UserManager:
             )
             category = categories[cat_choice]
 
+            # -------- DESCRIPTION --------
+            description = self.validation.get_valid_input(
+                "Enter Description / Note: ",
+                lambda x: len(x.strip()) > 0,
+                "❌ Description cannot be empty!"
+            )
+
             # -------- PAYMENT MODE (ONLY FOR WALLET, BANK, OTHER) --------
             if acc_choice in [1, 2, 4]:  # Wallet, Bank Account, Other
-                payment_modes = {1: "CASH", 2: "UPI", 3: "CARD"}
+                if acc_choice == 1:  # Wallet
+                    payment_modes = {
+                        1: "Cash",
+                        7: "Other"
+                    }
+                elif acc_choice == 2:  # Bank Account
+                    payment_modes = {
+                        1: "Cash",
+                        2: "UPI",
+                        3: "Debit Card",
+                        4: "Credit Card",
+                        5: "Net Banking",
+                        7: "Other"
+                    }
+                else:  # Other (acc_choice == 4)
+                    payment_modes = {
+                        1: "Cash",
+                        2: "UPI",
+                        3: "Debit Card",
+                        4: "Credit Card",
+                        5: "Net Banking",
+                        6: "Wallet",
+                        7: "Other"
+                    }
                 print("+-----------------------------------------------+")
                 print("| Select Payment Mode:                          |")
                 for k, v in payment_modes.items():
@@ -1109,13 +1579,6 @@ class UserManager:
                 payment_mode = payment_modes[pm_choice]
             else:
                 payment_mode = "N/A"  # Not applicable for Investment
-
-            # -------- DESCRIPTION --------
-            description = self.validation.get_valid_input(
-                "Enter Description / Note: ",
-                lambda x: len(x.strip()) > 0,
-                "❌ Description cannot be empty!"
-            )
 
             # -------- CONFIRM --------
             print("+-----------------------------------------------+")
@@ -1134,8 +1597,12 @@ class UserManager:
                 return
 
             # -------- DELEGATE TO WALLET --------
+            account_type = selected_account.lower().replace(" ", "_")
+            if acc_choice == 4:  # Manual Account
+                account_type = "manual_account"
+
             success, new_balance, message = self.wallet.process_expense(
-                self.logged_in_user_id, amount, category, payment_mode, description, self.logged_in_user
+                self.logged_in_user_id, account_type, account_id, amount, category, payment_mode, description, self.logged_in_user
             )
 
             if success:
@@ -1781,7 +2248,7 @@ class UserManager:
         print("+-----------------------------------+")
         print("| 1. Change Email                   |")
         print("| 2. Change Password                |")
-        print("| 3. Change Mobile                  |")
+        print("| 3. Change Mobile Number           |")
         print("| 0. Back                           |")
         print("+-----------------------------------+")
 
@@ -1935,7 +2402,7 @@ class UserManager:
         """Update user mobile"""
         try:
             new_mobile = self.validation.get_valid_input(
-                "Enter new mobile (10 digits, 6-9 start): ",
+                "Enter new mobile number:",
                 lambda x: re.match(r'^[6-9]\d{9}$', x),
                 "❌ Invalid mobile number!"
             )
