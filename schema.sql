@@ -135,7 +135,6 @@ CREATE TABLE IF NOT EXISTS manual_accounts (
     user_id INT,
     account_name VARCHAR(100),
     opening_balance DECIMAL(10,2),
-    notes VARCHAR(255),
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     FOREIGN KEY (user_id) REFERENCES users(user_id) ON DELETE CASCADE
 );

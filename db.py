@@ -134,6 +134,14 @@ class Database:
         result = self.execute_query(query, (user_id,), fetch=True)
         return result[0]['wallet_balance'] if result else 0.0
 
+    def get_user_total_balance(self, user_id):
+        """Get total balance across all accounts (wallet + bank + investment + manual)"""
+        wallet = self.get_user_balance(user_id)
+        bank = self.get_bank_balance(user_id)
+        investment = self.get_investment_value(user_id)
+        manual = self.get_manual_accounts_balance(user_id)
+        return wallet + bank + investment + manual
+
     def update_user_balance(self, user_id, new_balance):
         """Update user wallet balance"""
         query = "UPDATE users SET wallet_balance = %s WHERE user_id = %s"
@@ -244,14 +252,14 @@ class Database:
             query = "SELECT * FROM imported_transactions WHERE user_id = %s ORDER BY txn_date DESC"
             return self.execute_query(query, (user_id,), fetch=True)
 
-    def add_manual_account(self, user_id, account_name, opening_balance, notes):
+    def add_manual_account(self, user_id, account_name, opening_balance):
         """Add a manual account for the user"""
         query = """
             INSERT INTO manual_accounts
-            (user_id, account_name, opening_balance, notes)
-            VALUES (%s, %s, %s, %s)
+            (user_id, account_name, opening_balance)
+            VALUES (%s, %s, %s)
         """
-        return self.execute_insert(query, (user_id, account_name, opening_balance, notes))
+        return self.execute_insert(query, (user_id, account_name, opening_balance))
 
     def get_user_manual_accounts(self, user_id):
         """Get all manual accounts for a user"""
@@ -372,6 +380,16 @@ class Database:
         query = "UPDATE financial_goals SET status = 'ACTIVE' WHERE goal_id = %s"
         return self.execute_query(query, (goal_id,))
 
+    def update_goal_target_amount(self, goal_id, new_target_amount):
+        """Update the target amount of a financial goal"""
+        query = "UPDATE financial_goals SET target_amount = %s WHERE goal_id = %s"
+        return self.execute_query(query, (new_target_amount, goal_id))
+
+    def update_goal_monthly_savings(self, goal_id, new_monthly_savings):
+        """Update the monthly savings amount of a financial goal"""
+        query = "UPDATE financial_goals SET monthly_savings = %s WHERE goal_id = %s"
+        return self.execute_query(query, (new_monthly_savings, goal_id))
+
     def get_user_transaction_history(self, user_id, date_filter=None, limit=50):
         """Get recent transaction history for a user across all account types"""
         # This is a complex query that combines transactions from all account types
@@ -450,3 +468,18 @@ class Database:
             LIMIT %s
         """
         return self.execute_query(query, (user_id, user_id, user_id, user_id, limit), fetch=True)
+
+    def get_investment_account_details(self, transaction_id):
+        """Get investment account details for a specific transaction"""
+        query = """
+            SELECT
+                ia.investment_type,
+                ia.platform,
+                ia.quantity,
+                ia.price_per_share
+            FROM investment_accounts ia
+            JOIN investment_transactions it ON ia.investment_id = it.account_id
+            WHERE it.txn_id = %s
+        """
+        result = self.execute_query(query, (transaction_id,), fetch=True)
+        return result[0] if result else None
