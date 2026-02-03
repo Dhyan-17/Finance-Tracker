@@ -239,6 +239,14 @@ class StackQueueManager:
             return None
         return self.undo_stack.pop()
 
+    def remove_budget(self, user_id, category, month):
+        """Remove budget for category"""
+        key = f"{user_id}_{category}_{month}"
+        if key in self.budget_tracking:
+            del self.budget_tracking[key]
+            return True
+        return False
+
     def clear_user_data(self, user_id):
         """Clear all data for a user (logout cleanup)"""
         # Clear user-specific data from dictionaries

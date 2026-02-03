@@ -116,6 +116,12 @@ class Database:
         result = self.execute_query(query, (email,), fetch=True)
         return result[0] if result else None
 
+    def get_user_by_mobile(self, mobile):
+        """Get user by mobile"""
+        query = "SELECT * FROM users WHERE mobile = %s"
+        result = self.execute_query(query, (mobile,), fetch=True)
+        return result[0] if result else None
+
 
     def close(self):
         """Close database connection"""
@@ -194,14 +200,14 @@ class Database:
         result = self.execute_query(query, tuple(params), fetch=True)
         return result is not None and len(result) > 0
 
-    def add_bank_account(self, user_id, bank_name, account_holder, ifsc_code, last_four_digits, balance, nickname):
+    def add_bank_account(self, user_id, bank_name, account_holder, ifsc_code, last_four_digits, balance, nickname, upi_id=None, debit_card_last_four=None, credit_card_last_four=None, credit_card_limit=0.00):
         """Add a new bank account for the user"""
         query = """
             INSERT INTO bank_accounts
-            (user_id, bank_name, account_holder, ifsc_code, last_four_digits, balance, nickname)
-            VALUES (%s, %s, %s, %s, %s, %s, %s)
+            (user_id, bank_name, account_holder, ifsc_code, last_four_digits, balance, nickname, upi_id, debit_card_last_four, credit_card_last_four, credit_card_limit)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
         """
-        return self.execute_insert(query, (user_id, bank_name, account_holder, ifsc_code, last_four_digits, balance, nickname))
+        return self.execute_insert(query, (user_id, bank_name, account_holder, ifsc_code, last_four_digits, balance, nickname, upi_id, debit_card_last_four, credit_card_last_four, credit_card_limit))
 
     def get_user_bank_accounts(self, user_id):
         """Get all bank accounts for a user"""
@@ -214,14 +220,14 @@ class Database:
         result = self.execute_query(query, (user_id,), fetch=True)
         return result[0]['total_balance'] if result and result[0]['total_balance'] else 0.0
 
-    def add_investment_account(self, user_id, investment_name, investment_type, platform, invested_amount, current_value, quantity, price_per_share):
+    def add_investment_account(self, user_id, investment_name, investment_type, platform, invested_amount, current_value, quantity, price_per_share, price_change_percentage=0.00):
         """Add a new investment account for the user"""
         query = """
             INSERT INTO investment_accounts
-            (user_id, investment_name, investment_type, platform, invested_amount, current_value, quantity, price_per_share)
-            VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+            (user_id, investment_name, investment_type, platform, invested_amount, current_value, quantity, price_per_share, price_change_percentage, last_price_update)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, NOW())
         """
-        return self.execute_insert(query, (user_id, investment_name, investment_type, platform, invested_amount, current_value, quantity, price_per_share))
+        return self.execute_insert(query, (user_id, investment_name, investment_type, platform, invested_amount, current_value, quantity, price_per_share, price_change_percentage))
 
     def get_user_investment_accounts(self, user_id):
         """Get all investment accounts for a user"""
@@ -274,13 +280,13 @@ class Database:
 
     def get_manual_account_balance(self, account_id):
         """Get balance of a specific manual account"""
-        query = "SELECT opening_balance FROM manual_accounts WHERE account_id = %s"
+        query = "SELECT opening_balance FROM manual_accounts WHERE manual_account_id = %s"
         result = self.execute_query(query, (account_id,), fetch=True)
         return result[0]['opening_balance'] if result else 0.0
 
     def update_manual_account_balance(self, account_id, new_balance):
         """Update manual account balance"""
-        query = "UPDATE manual_accounts SET opening_balance = %s WHERE account_id = %s"
+        query = "UPDATE manual_accounts SET opening_balance = %s WHERE manual_account_id = %s"
         return self.execute_query(query, (new_balance, account_id))
 
     def add_manual_account_transaction(self, account_id, txn_type, amount, balance_after, category, source):
@@ -323,10 +329,30 @@ class Database:
         query = "UPDATE investment_accounts SET current_value = %s WHERE investment_id = %s"
         return self.execute_query(query, (new_value, account_id))
 
+    def update_investment_quantity(self, account_id, new_quantity):
+        """Update investment account quantity"""
+        query = "UPDATE investment_accounts SET quantity = %s WHERE investment_id = %s"
+        return self.execute_query(query, (new_quantity, account_id))
+
+    def update_investment_account(self, account_id, new_quantity, new_invested_amount, new_current_value):
+        """Update investment account quantity, invested amount, and current value"""
+        query = "UPDATE investment_accounts SET quantity = %s, invested_amount = %s, current_value = %s WHERE investment_id = %s"
+        return self.execute_query(query, (new_quantity, new_invested_amount, new_current_value, account_id))
+
+    def update_investment_price_data(self, account_id, new_price_per_share, price_change_percentage):
+        """Update investment price data and change percentage"""
+        query = "UPDATE investment_accounts SET price_per_share = %s, price_change_percentage = %s, last_price_update = NOW() WHERE investment_id = %s"
+        return self.execute_query(query, (new_price_per_share, price_change_percentage, account_id))
+
     def remove_investment_account(self, investment_id):
         """Remove an investment account"""
         query = "DELETE FROM investment_accounts WHERE investment_id = %s"
         return self.execute_query(query, (investment_id,))
+
+    def remove_manual_account(self, manual_account_id):
+        """Remove a manual account"""
+        query = "DELETE FROM manual_accounts WHERE manual_account_id = %s"
+        return self.execute_query(query, (manual_account_id,))
 
     def add_investment_transaction(self, account_id, txn_type, amount, value_after, category, source):
         """Add transaction record for investment account"""
@@ -483,3 +509,113 @@ class Database:
         """
         result = self.execute_query(query, (transaction_id,), fetch=True)
         return result[0] if result else None
+
+    def get_investment_account_by_id(self, investment_id):
+        """Get investment account details by investment_id"""
+        query = "SELECT * FROM investment_accounts WHERE investment_id = %s"
+        result = self.execute_query(query, (investment_id,), fetch=True)
+        return result[0] if result else None
+
+    def get_user_cash_balance(self, user_id):
+        """Get cash balance for user (same as wallet balance)"""
+        return self.get_user_balance(user_id)
+
+    def create_user_cash_account(self, user_id):
+        """Create cash account for user (ensure wallet exists)"""
+        # Wallet is always available, so just ensure balance is set
+        balance = self.get_user_balance(user_id)
+        if balance is None:
+            self.update_user_balance(user_id, 0.00)
+
+    def get_user_budgets(self, user_id, month_key=None):
+        """Get all budgets for a user, optionally filtered by month or year"""
+        if month_key:
+            # Check if month_key is a year (4 digits) or month (7 digits YYYY-MM)
+            if len(month_key) == 4:  # Year format (YYYY)
+                query = "SELECT * FROM budget WHERE user_id = %s AND month LIKE %s ORDER BY month, category"
+                return self.execute_query(query, (user_id, month_key + '-%'), fetch=True)
+            else:  # Month format (YYYY-MM)
+                query = "SELECT * FROM budget WHERE user_id = %s AND month = %s ORDER BY category"
+                return self.execute_query(query, (user_id, month_key), fetch=True)
+        else:
+            query = "SELECT * FROM budget WHERE user_id = %s ORDER BY month, category"
+            return self.execute_query(query, (user_id,), fetch=True)
+
+    def get_top_expenses(self, user_id, time_filter, category_filter=None, top_n=10):
+        """
+        Get top expenses based on time and category filters
+
+        Args:
+            user_id: User ID
+            time_filter: 'YYYY-MM' for month, 'YYYY' for year
+            category_filter: Category name or None for all categories
+            top_n: Number of top expenses to return
+
+        Returns:
+            List of expense dictionaries with total_amount and display_name
+        """
+        try:
+            # Build date condition using MySQL DATE_FORMAT
+            if len(time_filter) == 7:  # YYYY-MM format
+                date_condition = f"DATE_FORMAT(e.date, '%Y-%m') = '{time_filter}'"
+            elif len(time_filter) == 4:  # YYYY format
+                date_condition = f"YEAR(e.date) = {time_filter}"
+            else:
+                return []
+
+            # Build category condition and grouping logic
+            category_condition = ""
+            group_by = ""
+            select_fields = ""
+
+            if category_filter:
+                if category_filter.lower() == "others":
+                    # Special handling for Others - group by subtype
+                    category_condition = "AND e.category = 'Others'"
+                    group_by = "COALESCE(e.subtype, 'General')"
+                    select_fields = "COALESCE(e.subtype, 'General') as display_name"
+                else:
+                    # Specific category - group by description
+                    category_condition = f"AND e.category = '{category_filter}'"
+                    group_by = "e.description"
+                    select_fields = "e.description as display_name"
+            else:
+                # All categories - group by category
+                group_by = "e.category"
+                select_fields = "e.category as display_name"
+
+            # Build query
+            query = f"""
+                SELECT
+                    {select_fields},
+                    SUM(e.amount) as total_amount,
+                    COUNT(*) as transaction_count
+                FROM expenses e
+                WHERE e.user_id = %s
+                AND {date_condition}
+                {category_condition}
+                GROUP BY {group_by}
+                ORDER BY total_amount DESC
+                LIMIT %s
+            """
+
+            results = self.execute_query(query, (user_id, top_n), fetch=True)
+
+            # Format results
+            top_expenses = []
+            for row in results:
+                display_name = row['display_name']
+                if category_filter and category_filter.lower() == "others":
+                    display_name = f"Others - {display_name}"
+
+                top_expenses.append({
+                    'display_name': display_name,
+                    'total_amount': float(row['total_amount']),
+                    'transaction_count': row['transaction_count']
+                })
+
+            return top_expenses
+
+        except Exception as e:
+            print(f"Error getting top expenses: {e}")
+            return []

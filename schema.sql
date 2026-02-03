@@ -37,11 +37,15 @@ CREATE TABLE IF NOT EXISTS expenses (
     user_id INT NOT NULL,
     amount DECIMAL(10,2) NOT NULL,
     category VARCHAR(50) NOT NULL,
+    subtype VARCHAR(100) NULL,
     payment_mode ENUM('CASH', 'UPI', 'CARD') NOT NULL,
     description TEXT,
     date TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     FOREIGN KEY (user_id) REFERENCES users(user_id) ON DELETE CASCADE
 );
+
+-- Ensure subtype column exists (for backward compatibility)
+ALTER TABLE expenses ADD COLUMN IF NOT EXISTS subtype VARCHAR(100) NULL;
 
 -- Income table
 CREATE TABLE IF NOT EXISTS income (
@@ -70,7 +74,7 @@ CREATE TABLE IF NOT EXISTS budget (
     user_id INT NOT NULL,
     category VARCHAR(50) NOT NULL,
     limit_amount DECIMAL(10,2) NOT NULL,
-    month YEAR NOT NULL,
+    month VARCHAR(7) NOT NULL,
     FOREIGN KEY (user_id) REFERENCES users(user_id) ON DELETE CASCADE,
     UNIQUE KEY unique_budget (user_id, category, month)
 );
@@ -93,6 +97,10 @@ CREATE TABLE IF NOT EXISTS bank_accounts (
     last_four_digits VARCHAR(4),
     balance DECIMAL(10,2),
     nickname VARCHAR(100),
+    upi_id VARCHAR(50),
+    debit_card_last_four VARCHAR(4),
+    credit_card_last_four VARCHAR(4),
+    credit_card_limit DECIMAL(10,2) DEFAULT 0.00,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     FOREIGN KEY (user_id) REFERENCES users(user_id) ON DELETE CASCADE
 );
@@ -115,6 +123,14 @@ CREATE TABLE IF NOT EXISTS investment_accounts (
 -- Ensure columns exist (for backward compatibility)
 ALTER TABLE investment_accounts ADD COLUMN IF NOT EXISTS quantity DECIMAL(10,4) DEFAULT 0;
 ALTER TABLE investment_accounts ADD COLUMN IF NOT EXISTS price_per_share DECIMAL(10,2) DEFAULT 0;
+ALTER TABLE investment_accounts ADD COLUMN IF NOT EXISTS price_change_percentage DECIMAL(5,2) DEFAULT 0.00;
+ALTER TABLE investment_accounts ADD COLUMN IF NOT EXISTS last_price_update TIMESTAMP DEFAULT CURRENT_TIMESTAMP;
+
+-- Add new columns to bank_accounts for payment details
+ALTER TABLE bank_accounts ADD COLUMN IF NOT EXISTS upi_id VARCHAR(50);
+ALTER TABLE bank_accounts ADD COLUMN IF NOT EXISTS debit_card_last_four VARCHAR(4);
+ALTER TABLE bank_accounts ADD COLUMN IF NOT EXISTS credit_card_last_four VARCHAR(4);
+ALTER TABLE bank_accounts ADD COLUMN IF NOT EXISTS credit_card_limit DECIMAL(10,2) DEFAULT 0.00;
 
 -- Imported transactions table
 CREATE TABLE IF NOT EXISTS imported_transactions (

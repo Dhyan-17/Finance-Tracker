@@ -42,22 +42,26 @@ class SmartWallet:
         print("| Case 2 : User Login                            |")
         print("| Case 3 : User Sign Up                          |")
         print("| Case 4 : Exit                                  |")
-        print("+%------------------------------------------------+%")
+        print("+------------------------------------------------+")
         print("👉 Please select an option: ", end="")
 
     def main_menu_loop(self):
         """Main menu loop (Clean + Safe + Wallet Level)"""
 
         def print_invalid_choice():
-            print("+%-----------------------------+%")
-            print("|       INVALID CHOICE        |")
-            print("+%-----------------------------+%")
+            print("""
+            +-----------------------------+
+            |       INVALID CHOICE        |
+            +-----------------------------+
+            """)
 
         def print_exit_message():
-            print("+----------------------------------------------------+")
-            print("| Exiting..                                          |")
-            print("| Thanks For Using Smart Wallet & Finance System..   |")
-            print("+----------------------------------------------------+")
+            print("""
+            +----------------------------------------------------+
+            | Exiting..                                          |
+            | Thanks For Using Smart Wallet & Finance System..   |
+            +----------------------------------------------------+
+            """)
 
         while True:
             try:

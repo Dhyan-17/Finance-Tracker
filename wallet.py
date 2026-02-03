@@ -82,7 +82,8 @@ class Wallet:
                 current_balance = float(self.db.get_manual_account_balance(account_id))
                 new_balance = current_balance + amount
 
-                if self.db.update_manual_account_balance(account_id, new_balance):
+                update_result = self.db.update_manual_account_balance(account_id, new_balance)
+                if update_result:
                     # Add manual account transaction record
                     self.db.add_manual_account_transaction(account_id, 'INCOME', amount, new_balance, category, source)
 
@@ -91,7 +92,13 @@ class Wallet:
 
                     return True, new_balance, "Income added to manual account successfully"
 
-                return False, current_balance, "Failed to update manual account balance"
+                # Debug: Check if account exists
+                check_query = "SELECT manual_account_id FROM manual_accounts WHERE manual_account_id = %s"
+                account_exists = self.db.execute_query(check_query, (account_id,), fetch=True)
+                if not account_exists:
+                    return False, current_balance, f"Manual account with ID {account_id} does not exist"
+
+                return False, current_balance, f"Failed to update manual account balance (account exists but update failed)"
 
             else:
                 return False, 0, "Invalid account type"
@@ -99,12 +106,12 @@ class Wallet:
         except Exception as e:
             return False, 0, str(e)
 
-    def process_expense(self, user_id, account_type, account_id, amount, category, payment_mode, description, username):
+    def process_expense(self, user_id, account_type, account_id, amount, category, payment_mode, description, username, subtype=None):
         """Process expense deduction from specified account type"""
         try:
             if account_type == "wallet":
                 # Check balance
-                current_balance = self.db.get_user_balance(user_id)
+                current_balance = float(self.db.get_user_balance(user_id))
                 if amount > current_balance:
                     return False, current_balance, "Insufficient wallet balance"
 
@@ -124,16 +131,17 @@ class Wallet:
                     # Add transaction record
                     self.db.add_transaction(user_id, 'EXPENSE', amount, new_balance)
 
-                    # Add expense record
-                    query = """INSERT INTO expenses (user_id, amount, category, payment_mode, description)
-                               VALUES (%s, %s, %s, %s, %s)"""
-                    self.db.execute_insert(query, (user_id, amount, category, payment_mode, description))
+                    # Add expense record with subtype support
+                    query = """INSERT INTO expenses (user_id, amount, category, subtype, payment_mode, description)
+                               VALUES (%s, %s, %s, %s, %s, %s)"""
+                    self.db.execute_insert(query, (user_id, amount, category, subtype, payment_mode, description))
 
                     # Update DSA structures
                     expense_data = {
                         'type': 'EXPENSE',
                         'amount': amount,
                         'category': category,
+                        'subtype': subtype,
                         'payment_mode': payment_mode,
                         'description': description,
                         'date': datetime.now()
@@ -158,9 +166,42 @@ class Wallet:
 
             elif account_type == "bank_account":
                 # Check bank account balance
-                current_balance = self.db.get_bank_account_balance(account_id)
+                current_balance = float(self.db.get_bank_account_balance(account_id))
                 if amount > current_balance:
                     return False, current_balance, "Insufficient bank account balance"
+
+                # Check credit card limit if using credit card
+                if payment_mode == "Credit Card":
+                    # Get credit card limit for this account
+                    credit_limit_query = "SELECT credit_card_limit FROM bank_accounts WHERE account_id = %s"
+                    credit_limit_result = self.db.execute_query(credit_limit_query, (account_id,), fetch=True)
+
+                    if credit_limit_result and credit_limit_result[0]['credit_card_limit'] > 0:
+                        credit_limit = float(credit_limit_result[0]['credit_card_limit'])
+
+                        # Get current month's credit card spending
+                        current_month = datetime.now().strftime("%Y-%m")
+                        credit_spend_query = """
+                            SELECT COALESCE(SUM(amount), 0) as monthly_spend
+                            FROM bank_transactions
+                            WHERE account_id = %s AND type = 'EXPENSE' AND category = 'Credit Card Payment'
+                            AND DATE_FORMAT(date, '%%Y-%%m') = %s
+                        """
+                        spend_result = self.db.execute_query(credit_spend_query, (account_id, current_month), fetch=True)
+                        monthly_spend = float(spend_result[0]['monthly_spend']) if spend_result else 0.0
+
+                        remaining_limit = credit_limit - monthly_spend
+
+                        if amount > remaining_limit:
+                            return False, current_balance, f"Credit card limit exceeded. Remaining limit: ₹{remaining_limit:.2f}"
+
+                        # Show remaining limit after transaction
+                        new_remaining_limit = remaining_limit - amount
+                        print("+-----------------------------------------------+")
+                        print(f"| Credit Card Update:                           |")
+                        print(f"| Amount Used: ₹{amount:<30.2f}|")
+                        print(f"| Remaining Limit: ₹{new_remaining_limit:<26.2f}|")
+                        print("+-----------------------------------------------+")
 
                 # Update bank account balance
                 new_balance = current_balance - amount
@@ -178,7 +219,7 @@ class Wallet:
 
             elif account_type == "investment_account":
                 # Check investment account value
-                current_value = self.db.get_investment_account_value(account_id)
+                current_value = float(self.db.get_investment_account_value(account_id))
                 if amount > current_value:
                     return False, current_value, "Insufficient investment account value"
 
@@ -196,6 +237,26 @@ class Wallet:
 
                 return False, current_value, "Failed to update investment account value"
 
+            elif account_type == "manual_account":
+                # Check manual account balance
+                manual_balance = float(self.db.get_manual_account_balance(account_id))
+                if amount > manual_balance:
+                    return False, manual_balance, "Insufficient manual account balance"
+
+                # Update manual account balance
+                new_manual_balance = manual_balance - amount
+
+                if self.db.update_manual_account_balance(account_id, new_manual_balance):
+                    # Add manual account transaction record
+                    self.db.add_manual_account_transaction(account_id, 'EXPENSE', amount, new_manual_balance, category, description)
+
+                    # Log action
+                    self.db.log_action(f"User: {username}", f"Added expense: ₹{amount} ({category}) from manual account")
+
+                    return True, new_manual_balance, "Expense added from manual account successfully"
+
+                return False, manual_balance, "Failed to update manual account balance"
+
             else:
                 return False, 0, "Invalid account type"
 
@@ -206,12 +267,12 @@ class Wallet:
         """Process money transfer between users"""
         try:
             # Check sender balance
-            sender_balance = self.db.get_user_balance(sender_id)
+            sender_balance = float(self.db.get_user_balance(sender_id))
             if amount > sender_balance:
                 return False, "Insufficient balance"
 
             # Get receiver balance
-            receiver_balance = self.db.get_user_balance(receiver_id)
+            receiver_balance = float(self.db.get_user_balance(receiver_id))
 
             # Calculate new balances
             new_sender_balance = sender_balance - amount
@@ -414,7 +475,7 @@ class Wallet:
 
             # -------- EXPENSE UNDO --------
             if last_txn["type"] == "EXPENSE":
-                current_balance = self.db.get_user_balance(user_id)
+                current_balance = float(self.db.get_user_balance(user_id))
                 new_balance = current_balance + last_txn["amount"]
 
                 if self.db.update_user_balance(user_id, new_balance):
@@ -423,7 +484,7 @@ class Wallet:
 
             # -------- INCOME UNDO --------
             elif last_txn["type"] == "INCOME":
-                current_balance = self.db.get_user_balance(user_id)
+                current_balance = float(self.db.get_user_balance(user_id))
                 new_balance = current_balance - last_txn["amount"]
 
                 if new_balance < 0:
@@ -440,12 +501,12 @@ class Wallet:
                 receiver_id = last_txn["receiver_id"]
                 amount = last_txn["amount"]
 
-                receiver_balance = self.db.get_user_balance(receiver_id)
+                receiver_balance = float(self.db.get_user_balance(receiver_id))
                 if receiver_balance < amount:
                     return False, "Cannot undo transfer (receiver spent money)"
 
                 # Rollback balances
-                self.db.update_user_balance(sender_id, self.db.get_user_balance(sender_id) + amount)
+                self.db.update_user_balance(sender_id, float(self.db.get_user_balance(sender_id)) + amount)
                 self.db.update_user_balance(receiver_id, receiver_balance - amount)
 
                 self.db.log_action(f"User:{username}", f"Undo TRANSFER ₹{amount}")
