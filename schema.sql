@@ -68,15 +68,16 @@ CREATE TABLE IF NOT EXISTS transfers (
     FOREIGN KEY (receiver_id) REFERENCES users(user_id) ON DELETE CASCADE
 );
 
--- Budget table
+-- Budget table with separate year and month columns for efficient filtering
 CREATE TABLE IF NOT EXISTS budget (
     budget_id INT AUTO_INCREMENT PRIMARY KEY,
     user_id INT NOT NULL,
     category VARCHAR(50) NOT NULL,
     limit_amount DECIMAL(10,2) NOT NULL,
-    month VARCHAR(7) NOT NULL,
+    year INT NOT NULL,
+    month INT NOT NULL,
     FOREIGN KEY (user_id) REFERENCES users(user_id) ON DELETE CASCADE,
-    UNIQUE KEY unique_budget (user_id, category, month)
+    UNIQUE KEY unique_budget (user_id, category, year, month)
 );
 
 -- System logs table

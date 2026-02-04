@@ -26,9 +26,9 @@ class UserManager:
 
         try:
             email = self.validation.get_valid_input(
-                "| Enter Email (@gmail.com): ",
-                lambda x: re.match(r'^[a-zA-Z0-9._%+-]+@gmail\.com$', x.lower()),
-                "❌ Invalid Gmail address!"
+                "| Enter Email: ",
+                lambda x: re.match(r'^[a-zA-Z0-9._%+-]+@(gmail\.com|outlook\.com|hotmail\.com|yahoo\.com)$', x.lower()),
+                "❌ Invalid email! Use gmail/outlook/hotmail/yahoo"
             ).strip().lower()
 
             password = self.validation.get_valid_input(
@@ -114,9 +114,9 @@ class UserManager:
             )
 
             email = self.validation.get_valid_input(
-                "| Enter Email (@gmail.com): ",
-                lambda x: re.match(r'^[a-zA-Z0-9._%+-]+@gmail\.com$', x.lower()),
-                "❌ Invalid Gmail address!"
+                "| Enter Email: ",
+                lambda x: re.match(r'^[a-zA-Z0-9._%+-]+@(gmail\.com|outlook\.com|hotmail\.com|yahoo\.com)$', x.lower()),
+                "❌ Invalid email! Use gmail/outlook/hotmail/yahoo"
             ).strip().lower()
 
             mobile = self.validation.get_valid_input(
@@ -1785,15 +1785,7 @@ class UserManager:
 
             # -------- CONFIRM --------
             print("+------------------------------------------------+")
-            if acc_choice == 4:  # Manual Account
-                manual_accounts = self.db.get_user_manual_accounts(self.logged_in_user_id)
-                selected_manual = next((acc for acc in manual_accounts if acc['manual_account_id'] == account_id), None)
-                if selected_manual:
-                    print(f"| Account  : {selected_manual['account_name']:<30}|")
-                else:
-                    print(f"| Account  : Manual Account (ID: {account_id})")
-            else:
-                print(f"| Account  : {selected_account:<30}|")
+            print(f"| Account  : {selected_account:<30}|")
             print(f"| Category : {selected_category:<30}|")
             print(f"| Amount   : ₹{amount:<28.2f}|")
             print(f"| Note     : {source:<30}|")
@@ -1808,8 +1800,6 @@ class UserManager:
 
             # -------- DELEGATE TO WALLET --------
             account_type = selected_account.lower().replace(" ", "_")
-            if acc_choice == 4:  # Manual Account
-                account_type = "manual_account"
 
             success, new_balance, message = self.wallet.process_income(
                 self.logged_in_user_id,
@@ -1824,8 +1814,8 @@ class UserManager:
             if success:
                 print("+------------------------------------------------+")
                 print(f"| ✅ {message:<41}|")
-                if acc_choice == 1:  # Wallet
-                    print(f"| New Wallet Balance: ₹{new_balance:<12.2f}|")
+                if acc_choice == 1:  # Bank Account
+                    print(f"| New Bank Balance: ₹{new_balance:<14.2f}|")
                 elif acc_choice == 2:  # Manual Account
                     print(f"| New Manual Account Balance: ₹{new_balance:<8.2f}|")
                 print("+------------------------------------------------+")
@@ -2460,14 +2450,15 @@ class UserManager:
                     return
 
             # -------- DB UPDATE --------
+            year, month = map(int, month_key.split('-'))
             query = """
-                INSERT INTO budget (user_id, category, month, limit_amount)
-                VALUES (%s, %s, %s, %s)
+                INSERT INTO budget (user_id, category, year, month, limit_amount)
+                VALUES (%s, %s, %s, %s, %s)
                 ON DUPLICATE KEY UPDATE limit_amount = %s
             """
             self.db.execute_query(
                 query,
-                (self.logged_in_user_id, category, month_key, limit_amount, limit_amount)
+                (self.logged_in_user_id, category, year, month, limit_amount, limit_amount)
             )
 
             # -------- DSA UPDATE --------
@@ -2495,13 +2486,14 @@ class UserManager:
 
     def get_existing_budget(self, category, month_key):
         """Fetch existing budget for category & month (helper)"""
+        year, month = map(int, month_key.split('-'))
         query = """
             SELECT limit_amount FROM budget
-            WHERE user_id = %s AND category = %s AND month = %s
+            WHERE user_id = %s AND category = %s AND year = %s AND month = %s
         """
         result = self.db.execute_query(
             query,
-            (self.logged_in_user_id, category, month_key),
+            (self.logged_in_user_id, category, year, month),
             fetch=True
         )
         return result[0]["limit_amount"] if result else None
@@ -2774,10 +2766,8 @@ class UserManager:
                 "❌ Invalid month format!"
             )
 
-            budgets = self.stack_queue.get_all_budgets(
-                self.logged_in_user_id,
-                month_key
-            )
+            # Query database directly for consistency
+            budgets = self.get_budgets_with_spent(self.logged_in_user_id, month_key)
 
             if not budgets:
                 print("+------------------------------------------------+")
@@ -2820,11 +2810,12 @@ class UserManager:
                 return
 
             # Update in database
+            year, month = map(int, month_key.split('-'))
             query = """
                 UPDATE budget SET limit_amount = %s
-                WHERE user_id = %s AND category = %s AND month = %s
+                WHERE user_id = %s AND category = %s AND year = %s AND month = %s
             """
-            self.db.execute_query(query, (new_limit, self.logged_in_user_id, selected_category, month_key))
+            self.db.execute_query(query, (new_limit, self.logged_in_user_id, selected_category, year, month))
 
             # Update in DSA
             self.stack_queue.set_budget(
@@ -2862,10 +2853,8 @@ class UserManager:
                 "❌ Invalid month format!"
             )
 
-            budgets = self.stack_queue.get_all_budgets(
-                self.logged_in_user_id,
-                month_key
-            )
+            # Query database directly for consistency
+            budgets = self.get_budgets_with_spent(self.logged_in_user_id, month_key)
 
             if not budgets:
                 print("+------------------------------------------------+")
@@ -2902,11 +2891,12 @@ class UserManager:
                 return
 
             # Delete from database
+            year, month = map(int, month_key.split('-'))
             query = """
                 DELETE FROM budget
-                WHERE user_id = %s AND category = %s AND month = %s
+                WHERE user_id = %s AND category = %s AND year = %s AND month = %s
             """
-            self.db.execute_query(query, (self.logged_in_user_id, selected_category, month_key))
+            self.db.execute_query(query, (self.logged_in_user_id, selected_category, year, month))
 
             # Remove from DSA
             self.stack_queue.remove_budget(
@@ -2986,71 +2976,31 @@ class UserManager:
                     print("+------------------------------------------------+")
                     return
 
-            # Category selection
-            categories = [
-                "Food & Drinks", "Shopping", "Housing", "Transportation",
-                "Vehicle", "Life & Entertainment", "Communication",
-                "Healthcare", "Finance Expense", "Investments", "Education", "Others"
-            ]
-
-            print("+------------------------------------------------+")
-            print("| Select Expense Category (or 0 for All):       |")
-            for i, cat in enumerate(categories, 1):
-                print(f"| {i}. {cat:<45}|")
-            print("| 0. All Categories                             |")
-            print("+------------------------------------------------+")
-
-            cat_choice = self.validation.get_valid_int(
-                "Enter choice: ",
-                lambda x: 0 <= x <= len(categories),
-                "❌ Invalid choice!"
-            )
-
-            category_filter = None
-            if cat_choice > 0:
-                category_filter = categories[cat_choice - 1]
-
-                # Special handling for "Others" category
-                if category_filter.lower() == "others":
-                    print("+------------------------------------------------+")
-                    print("| Enter sub-type for Others category:           |")
-                    print("| (e.g., Pet Care, Gifts, Repairs, etc.)        |")
-                    print("+------------------------------------------------+")
-                    subtype = self.validation.get_valid_input(
-                        "Enter sub-type: ",
-                        lambda x: len(x.strip()) > 0,
-                        "❌ Sub-type cannot be empty!"
-                    ).strip()
-
-                    # For Others category, we'll filter by subtype in the query
-                    # This is handled in the database method
-
-            # Get top expenses from database
-            top_expenses = self.db.get_top_expenses(
+            # Get top individual expenses from database (ALL categories)
+            top_expenses = self.db.get_top_individual_expenses(
                 self.logged_in_user_id,
                 time_filter,
-                category_filter,
+                category_filter=None,
+                subtype_filter=None,
                 top_n=10
             )
 
             if not top_expenses:
                 print("+------------------------------------------------+")
-                print("| No expenses found for selected criteria.      |")
+                print("| No expenses found for selected period.        |")
                 print("+------------------------------------------------+")
                 return
 
             # Display results
             print("+------------------------------------------------+")
             print(f"| {period_label:<46}|")
-            if category_filter:
-                print(f"| Category: {category_filter:<37}|")
-            else:
-                print("| Category: All Categories                      |")
             print("+------------------------------------------------+")
 
             for i, expense in enumerate(top_expenses, 1):
-                amount_str = f"₹{expense['total_amount']:,.2f}"
-                print(f"| {i}. {expense['display_name']:<35} {amount_str:>10}|")
+                desc = expense['description'][:18] if len(expense['description']) > 18 else expense['description']
+                cat = expense['category'][:14] if len(expense['category']) > 14 else expense['category']
+                amount_str = f"₹{expense['amount']:,.0f}"
+                print(f"| {i:2}. {desc:<18} ({cat:<14}) {amount_str:>9}|")
 
             print("+------------------------------------------------+")
 
@@ -3196,9 +3146,9 @@ class UserManager:
 
             # -------- NEW EMAIL INPUT --------
             new_email = self.validation.get_valid_input(
-                "Enter new email (@gmail.com): ",
-                lambda x: re.match(r'^[a-zA-Z0-9._%+-]+@gmail\.com$', x.lower()),
-                "❌ Invalid Gmail address!"
+                "Enter new email: ",
+                lambda x: re.match(r'^[a-zA-Z0-9._%+-]+@(gmail\.com|outlook\.com|hotmail\.com|yahoo\.com)$', x.lower()),
+                "❌ Invalid email! Use gmail/outlook/hotmail/yahoo"
             ).lower()
 
             # -------- SAME EMAIL CHECK --------

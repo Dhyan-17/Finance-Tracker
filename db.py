@@ -418,15 +418,23 @@ class Database:
 
     def get_user_transaction_history(self, user_id, date_filter=None, limit=50):
         """Get recent transaction history for a user across all account types"""
-        # This is a complex query that combines transactions from all account types
-
-        # Build date condition based on filter
-        date_condition = ""
+        # Build parameterized query to prevent SQL injection
+        params = [user_id]
+        
+        # Build date condition with proper parameterization
         if date_filter:
             if len(date_filter) == 7:  # YYYY-MM format
-                date_condition = f"AND DATE_FORMAT(date, '%Y-%m') = '{date_filter}'"
+                date_condition = "AND DATE_FORMAT(date, '%Y-%m') = %s"
+                date_params = [date_filter] * 4  # One for each UNION section
             elif len(date_filter) == 4:  # YYYY format
-                date_condition = f"AND YEAR(date) = {date_filter}"
+                date_condition = "AND YEAR(date) = %s"
+                date_params = [int(date_filter)] * 4
+            else:
+                date_condition = ""
+                date_params = []
+        else:
+            date_condition = ""
+            date_params = []
 
         query = f"""
             SELECT
@@ -493,7 +501,15 @@ class Database:
             ORDER BY date DESC
             LIMIT %s
         """
-        return self.execute_query(query, (user_id, user_id, user_id, user_id, limit), fetch=True)
+        
+        # Build params: user_id + optional date for each section + limit
+        if date_params:
+            final_params = (user_id, date_params[0], user_id, date_params[1], 
+                           user_id, date_params[2], user_id, date_params[3], limit)
+        else:
+            final_params = (user_id, user_id, user_id, user_id, limit)
+        
+        return self.execute_query(query, final_params, fetch=True)
 
     def get_investment_account_details(self, transaction_id):
         """Get investment account details for a specific transaction"""
@@ -528,18 +544,124 @@ class Database:
             self.update_user_balance(user_id, 0.00)
 
     def get_user_budgets(self, user_id, month_key=None):
-        """Get all budgets for a user, optionally filtered by month or year"""
+        """Get all budgets for a user, optionally filtered by month or year
+        
+        Args:
+            user_id: User ID
+            month_key: 'YYYY-MM' for specific month, 'YYYY' for full year, or None for all
+        """
         if month_key:
-            # Check if month_key is a year (4 digits) or month (7 digits YYYY-MM)
-            if len(month_key) == 4:  # Year format (YYYY)
-                query = "SELECT * FROM budget WHERE user_id = %s AND month LIKE %s ORDER BY month, category"
-                return self.execute_query(query, (user_id, month_key + '-%'), fetch=True)
-            else:  # Month format (YYYY-MM)
-                query = "SELECT * FROM budget WHERE user_id = %s AND month = %s ORDER BY category"
-                return self.execute_query(query, (user_id, month_key), fetch=True)
+            if len(month_key) == 4:  # Year format (YYYY) - return all budgets for that year
+                query = """
+                    SELECT *, CONCAT(year, '-', LPAD(month, 2, '0')) as month_str 
+                    FROM budget 
+                    WHERE user_id = %s AND year = %s 
+                    ORDER BY month, category
+                """
+                return self.execute_query(query, (user_id, int(month_key)), fetch=True)
+            else:  # Month format (YYYY-MM) - return ONLY that specific month's budgets
+                year, month = month_key.split('-')
+                query = """
+                    SELECT *, CONCAT(year, '-', LPAD(month, 2, '0')) as month_str 
+                    FROM budget 
+                    WHERE user_id = %s AND year = %s AND month = %s 
+                    ORDER BY category
+                """
+                return self.execute_query(query, (user_id, int(year), int(month)), fetch=True)
         else:
-            query = "SELECT * FROM budget WHERE user_id = %s ORDER BY month, category"
+            query = """
+                SELECT *, CONCAT(year, '-', LPAD(month, 2, '0')) as month_str 
+                FROM budget 
+                WHERE user_id = %s 
+                ORDER BY year, month, category
+            """
             return self.execute_query(query, (user_id,), fetch=True)
+
+    def get_top_individual_expenses(self, user_id, time_filter, category_filter=None, subtype_filter=None, top_n=10):
+        """
+        Get top individual expenses (not grouped) sorted by amount DESC
+
+        Args:
+            user_id: User ID
+            time_filter: 'YYYY-MM' for month, 'YYYY' for year
+            category_filter: Category name or None for all
+            subtype_filter: Subtype for 'Others' category
+            top_n: Number of results
+
+        Returns:
+            List of individual expense records
+        """
+        try:
+            params = [user_id]
+
+            # Build date condition
+            if len(time_filter) == 7:  # YYYY-MM
+                date_condition = "DATE_FORMAT(date, '%Y-%m') = %s"
+                params.append(time_filter)
+            elif len(time_filter) == 4:  # YYYY
+                date_condition = "YEAR(date) = %s"
+                params.append(int(time_filter))
+            else:
+                return []
+
+            # Build category condition
+            category_condition = ""
+            if category_filter:
+                if category_filter.lower() == "others" and subtype_filter:
+                    category_condition = "AND category = %s AND subtype = %s"
+                    params.append("Others")
+                    params.append(subtype_filter)
+                elif category_filter.lower() == "others":
+                    category_condition = "AND category = %s"
+                    params.append("Others")
+                else:
+                    category_condition = "AND category = %s"
+                    params.append(category_filter)
+
+            params.append(top_n)
+
+            query = f"""
+                SELECT 
+                    expense_id,
+                    amount,
+                    category,
+                    COALESCE(subtype, '') as subtype,
+                    COALESCE(description, 'No Description') as description,
+                    DATE_FORMAT(date, '%Y-%m-%d') as expense_date
+                FROM expenses
+                WHERE user_id = %s
+                AND {date_condition}
+                {category_condition}
+                ORDER BY amount DESC
+                LIMIT %s
+            """
+
+            results = self.execute_query(query, tuple(params), fetch=True)
+
+            if not results:
+                return []
+
+            expenses = []
+            for row in results:
+                # Build display name
+                if row['category'] == 'Others' and row['subtype']:
+                    display_category = f"Others - {row['subtype']}"
+                else:
+                    display_category = row['category']
+
+                expenses.append({
+                    'id': row['expense_id'],
+                    'description': row['description'],
+                    'category': display_category,
+                    'amount': float(row['amount']),
+                    'date': row['expense_date']
+                })
+
+            return expenses
+
+        except Exception as e:
+            print(f"Error getting top individual expenses: {e}")
+            return []
 
     def get_top_expenses(self, user_id, time_filter, category_filter=None, top_n=10):
         """
@@ -555,11 +677,15 @@ class Database:
             List of expense dictionaries with total_amount and display_name
         """
         try:
-            # Build date condition using MySQL DATE_FORMAT
+            params = [user_id]
+            
+            # Build date condition using parameterized queries
             if len(time_filter) == 7:  # YYYY-MM format
-                date_condition = f"DATE_FORMAT(e.date, '%Y-%m') = '{time_filter}'"
+                date_condition = "DATE_FORMAT(e.date, '%Y-%m') = %s"
+                params.append(time_filter)
             elif len(time_filter) == 4:  # YYYY format
-                date_condition = f"YEAR(e.date) = {time_filter}"
+                date_condition = "YEAR(e.date) = %s"
+                params.append(int(time_filter))
             else:
                 return []
 
@@ -571,20 +697,25 @@ class Database:
             if category_filter:
                 if category_filter.lower() == "others":
                     # Special handling for Others - group by subtype
-                    category_condition = "AND e.category = 'Others'"
+                    category_condition = "AND e.category = %s"
+                    params.append("Others")
                     group_by = "COALESCE(e.subtype, 'General')"
                     select_fields = "COALESCE(e.subtype, 'General') as display_name"
                 else:
                     # Specific category - group by description
-                    category_condition = f"AND e.category = '{category_filter}'"
-                    group_by = "e.description"
-                    select_fields = "e.description as display_name"
+                    category_condition = "AND e.category = %s"
+                    params.append(category_filter)
+                    group_by = "COALESCE(e.description, 'No Description')"
+                    select_fields = "COALESCE(e.description, 'No Description') as display_name"
             else:
                 # All categories - group by category
                 group_by = "e.category"
                 select_fields = "e.category as display_name"
 
-            # Build query
+            # Add limit parameter
+            params.append(top_n)
+
+            # Build query with proper parameterization
             query = f"""
                 SELECT
                     {select_fields},
@@ -595,23 +726,28 @@ class Database:
                 AND {date_condition}
                 {category_condition}
                 GROUP BY {group_by}
+                HAVING SUM(e.amount) > 0
                 ORDER BY total_amount DESC
                 LIMIT %s
             """
 
-            results = self.execute_query(query, (user_id, top_n), fetch=True)
+            results = self.execute_query(query, tuple(params), fetch=True)
+
+            # Handle None or empty results
+            if not results:
+                return []
 
             # Format results
             top_expenses = []
             for row in results:
-                display_name = row['display_name']
+                display_name = row['display_name'] or 'Unknown'
                 if category_filter and category_filter.lower() == "others":
                     display_name = f"Others - {display_name}"
 
                 top_expenses.append({
                     'display_name': display_name,
-                    'total_amount': float(row['total_amount']),
-                    'transaction_count': row['transaction_count']
+                    'total_amount': float(row['total_amount'] or 0),
+                    'transaction_count': row['transaction_count'] or 0
                 })
 
             return top_expenses

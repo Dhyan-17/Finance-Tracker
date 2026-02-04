@@ -117,15 +117,18 @@ class Analytics:
     def get_budget_analysis(self, user_id, month):
         """Analyze budget vs actual spending"""
         try:
-            # Get budgets for the month
+            # Parse month string (YYYY-MM) into year and month integers
+            year_int, month_int = map(int, month.split('-'))
+            
+            # Get budgets for the month using correct year/month columns
             budget_query = """
                 SELECT category, limit_amount
                 FROM budget
-                WHERE user_id = %s AND month = %s
+                WHERE user_id = %s AND year = %s AND month = %s
             """
             budgets = self.db.execute_query(
                 budget_query,
-                (user_id, month),
+                (user_id, year_int, month_int),
                 fetch=True
             )
             if not budgets:

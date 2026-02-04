@@ -74,9 +74,13 @@ class Validation:
             except Exception as e:
                 print(f"❌ Input error: {str(e)}")
 
+    # Allowed email domains
+    ALLOWED_DOMAINS = {'gmail.com', 'outlook.com', 'hotmail.com', 'yahoo.com'}
+    
     def validate_email(self, email):
-        """Validate Gmail email address"""
-        return re.match(r'^[a-zA-Z0-9._%+-]+@gmail\.com$', email.lower())
+        """Validate email address against allowed domains"""
+        pattern = r'^[a-zA-Z0-9._%+-]+@(' + '|'.join(self.ALLOWED_DOMAINS) + r')$'
+        return re.match(pattern, email.lower())
 
     def validate_mobile(self, mobile):
         """Validate Indian mobile number (10 digits, starts with 6-9)"""
