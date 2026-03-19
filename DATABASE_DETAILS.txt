@@ -1,0 +1,962 @@
+================================================================================
+DATABASE EXPLANATION - SMART FINANCE TRACKER
+================================================================================
+
+This document explains the database design and implementation of my Smart 
+Finance Tracker project. I have written this in simple English to help 
+explain how the database works.
+
+================================================================================
+1. DATABASE OVERVIEW
+================================================================================
+
+Why SQLite Is Used
+-----------------
+
+I chose SQLite for this project because it is a lightweight, file-based 
+database that is perfect for personal finance applications.
+
+SQLite does not require installing a separate database server like MySQL or 
+PostgreSQL. Instead, all data is stored in a single file called fintech.db. 
+This makes the application very easy to set up and run.
+
+For a personal finance tracker where one user manages their own data, SQLite 
+provides all the features we need. It supports standard SQL queries, 
+transactions for data integrity, and can handle thousands of records 
+efficiently.
+
+SQLite is also very reliable. It uses file-level locking to ensure that 
+data remains consistent even if the application crashes. The Write-Ahead 
+Logging (WAL) mode that I enabled in the schema ensures that read and write 
+operations don't block each other, making the application faster and more 
+responsive.
+
+Another advantage is portability. Since all data is in one file, users can 
+easily backup their entire finance data by simply copying the file.
+
+Why Paise Is Stored as Integer
+-------------------------------
+
+One important design decision was to store all monetary values as integers 
+representing paise (cents), rather than using decimal numbers.
+
+For example:
+- 100 rupees = 10000 paise
+- 50.50 rupees = 5050 paise
+- 1 rupee = 100 paise
+
+The reason for this is precision. Computers have difficulty with decimal 
+numbers because of floating-point representation errors. For example, 
+adding 0.1 + 0.2 in programming might give you 0.30000000000000004 instead 
+of 0.3.
+
+In financial applications, precision is absolutely critical. We cannot have 
+small errors in calculations that could add up to significant amounts over 
+time.
+
+By storing everything as integers (whole numbers), we avoid all floating-point 
+errors. All calculations are exact. When we need to display the amount to 
+users, we simply divide by 100 to convert paise back to rupees.
+
+The database has utility functions to_paise() and to_rupees() that handle 
+this conversion automatically, so the rest of the application code works 
+with regular decimal rupees just like users expect.
+
+================================================================================
+2. TABLE-BY-TABLE EXPLANATION
+================================================================================
+
+2.1 users Table
+-----------
+
+Purpose: Stores registered user information
+
+This is the main table that holds all user account data. Every person who 
+registers in the application has a record in this table.
+
+Important Columns:
+- user_id: A unique number that identifies each user (primary key)
+- username: The unique name users choose for their account
+- password_hash: The encrypted version of the user's password (never stored 
+  as plain text for security)
+- email: User's email address (must be unique)
+- mobile: User's mobile number (must be unique, 10 digits)
+- wallet_balance: The amount of money in user's virtual wallet (stored in 
+  paise)
+- status: Whether the account is active, blocked, or suspended
+- created_at: When the account was created
+- last_login: The last time the user logged in
+- failed_login_attempts: Counter for failed login tries (for security)
+- locked_until: Timestamp for when account will be unlocked after too many 
+  failed attempts
+
+Relationships:
+- One user can have many expenses (one-to-many)
+- One user can have many income records (one-to-many)
+- One user can have many bank accounts (one-to-many)
+- One user can have many budgets (one-to-many)
+- One user can have many financial goals (one-to-many)
+- One user can have many investments (one-to-many)
+
+2.2 bank_accounts Table
+-------------------
+
+Purpose: Stores user's bank account information
+
+Users can link their real bank accounts to track balances across multiple 
+banks in one place.
+
+Important Columns:
+- account_id: Unique identifier for each bank account
+- user_id: Links to the user who owns this account
+- bank_id: Links to the master_banks table for bank details
+- account_number_last4: Last 4 digits of account number (for security)
+- account_holder: Name on the bank account
+- balance: Current balance in the bank account (in paise)
+- account_type: Whether it's SAVINGS, CURRENT, or SALARY account
+- nickname: User's friendly name for this account
+- upi_id: UPI payment address if available
+- is_primary: Whether this is the primary account for transactions
+
+Relationships:
+- Each bank account belongs to one user (many-to-one)
+- Each bank account can have many transactions
+
+2.3 expenses Table
+--------------
+
+Purpose: Records every expense or spending made by the user
+
+This is where all expenditure details are stored. Every time a user spends 
+money, a record is created here.
+
+Important Columns:
+- expense_id: Unique identifier for each expense
+- user_id: Links to the user who made this expense
+- amount: How much was spent (in paise)
+- category: Type of expense like Food, Transport, Shopping, etc.
+- subcategory: More specific category if needed
+- description: Optional notes about the expense
+- payment_mode: How the payment was made (UPI, Cash, Card, etc.)
+- account_type: Whether money came from WALLET or BANK
+- account_id: Which bank account was used (if applicable)
+- merchant: Name of the store or vendor
+- location: Where the purchase was made
+- date: When the expense occurred
+
+Relationships:
+- Each expense belongs to one user (many-to-one)
+- Can link to a specific bank account if used
+
+2.4 income Table
+-----------
+
+Purpose: Records all money received by the user
+
+This tracks all sources of income like salary, freelance work, gifts, etc.
+
+Important Columns:
+- income_id: Unique identifier
+- user_id: Links to the user who received this income
+- amount: How much was received (in paise)
+- source: Where the money came from (Salary, Freelance, Gift, etc.)
+- category: Optional categorization
+- description: Notes about the income
+- account_type: Whether money went to WALLET or BANK
+- account_id: Which account received the money
+- date: When the income was received
+
+Relationships:
+- Each income record belongs to one user (many-to-one)
+
+2.5 budgets Table
+------------
+
+Purpose: Stores monthly spending limits for different categories
+
+Users can set budgets to control their spending in various categories.
+
+Important Columns:
+- budget_id: Unique identifier
+- user_id: Links to the user who set this budget
+- category: Which spending category this budget is for
+- limit_amount: Maximum amount allowed (in paise)
+- year: Which year this budget applies to
+- month: Which month this budget applies to
+- alert_threshold: Percentage at which to send warning (default 80%)
+- notifications_enabled: Whether to send alerts for this budget
+
+Relationships:
+- Each budget belongs to one user (many-to-one)
+- Unique constraint ensures one budget per user per category per month
+
+2.6 financial_goals Table
+---------------------
+
+Purpose: Tracks savings goals set by users
+
+Users can create financial targets like buying a car, vacation, or 
+building an emergency fund.
+
+Important Columns:
+- goal_id: Unique identifier
+- user_id: Links to the user who created this goal
+- goal_name: Name of the goal (e.g., "Buy a Car")
+- target_amount: How much money needs to be saved (in paise)
+- current_savings: How much has been saved so far (in paise)
+- monthly_contribution: Expected monthly saving amount (dynamically 
+  recalculated based on remaining amount and months to target date 
+  whenever user adds money to the goal)
+- target_date: When the goal should be achieved by
+- priority: HIGH, MEDIUM, or LOW importance
+- status: ACTIVE, COMPLETED, PAUSED, or CANCELLED
+- icon and color: For visual representation
+- created_at: When the goal was created
+- completed_at: When the goal was achieved
+
+Relationships:
+- Each goal belongs to one user (many-to-one)
+- Each goal can have many contributions (one-to-many)
+
+2.7 market_assets Table
+-------------------
+
+Purpose: Contains available investment assets for the simulated market
+
+This table holds all stocks, mutual funds, cryptocurrencies, and other 
+investable assets that users can trade in the simulation.
+
+Important Columns:
+- asset_id: Unique identifier
+- asset_name: Full name of the asset (e.g., "Reliance Industries")
+- asset_symbol: Short code (e.g., "RELIANCE")
+- asset_type: STOCK, MUTUAL_FUND, CRYPTO, ETF, BOND, or GOLD
+- current_price: Current market price (in paise)
+- previous_price: Price from the previous update
+- day_change_percent: How much price changed today
+- week_high and week_low: Weekly price range
+- volatility_percent: How unstable the price is (affects simulation)
+- market_cap: Market capitalization value
+- is_active: Whether trading is allowed
+- last_updated: When price was last updated
+
+The database is pre-populated with 21 sample assets including Indian 
+stocks (TCS, Infosys, HDFC Bank), cryptocurrencies (Bitcoin, Ethereum), 
+mutual funds, and digital gold.
+
+Relationships:
+- Can be linked to many user investments (one-to-many)
+- Has price history records (one-to-many)
+
+2.8 user_investments Table
+----------------------
+
+Purpose: Tracks what investments each user owns
+
+This shows the user's current holdings in their investment portfolio.
+
+Important Columns:
+- investment_id: Unique identifier
+- user_id: Links to the owner
+- asset_id: Which asset is held
+- units_owned: How many units/shares the user has
+- buy_price: Average price paid per unit (in paise)
+- invested_amount: Total money invested (in paise)
+- purchase_date: When the first purchase was made
+
+If a user buys more of the same asset later, the average buy price 
+is recalculated to reflect the new overall average cost.
+
+Relationships:
+- Each investment belongs to one user (many-to-one)
+- Each investment links to one market asset (many-to-one)
+
+2.9 audit_logs Table
+----------------
+
+Purpose: Records all actions for security and debugging
+
+Every important action in the application is logged here for security 
+and troubleshooting purposes.
+
+Important Columns:
+- log_id: Unique identifier
+- actor_type: USER, ADMIN, or SYSTEM
+- actor_id: ID of the person or system who did the action
+- action: What happened (e.g., "User logged in", "Password changed")
+- entity_type: What was affected (e.g., "expense", "user")
+- entity_id: ID of the affected item
+- old_values: What the data looked like before (stored as JSON)
+- new_values: What the data looks like after (stored as JSON)
+- ip_address: Where the request came from
+- severity: INFO, WARNING, ERROR, or CRITICAL
+- created_at: When the action occurred
+
+This table is crucial for:
+- Tracking suspicious activity
+- Investigating security incidents
+- Understanding user behavior
+- Debugging problems
+
+Relationships:
+- Links to users and admins via actor_id
+
+================================================================================
+3. DATA FETCHING
+================================================================================
+
+How SELECT Queries Fetch Data
+-----------------------------
+
+When the application needs to display information, it uses SELECT queries 
+to fetch data from the database. Let me explain how this works:
+
+Basic Fetching:
+To get a single user's information, we use:
+    SELECT * FROM users WHERE user_id = 1
+
+This query searches through the users table and returns all columns (*) 
+where the user_id equals 1. The result is returned as a dictionary with 
+column names as keys.
+
+To get multiple records (like all expenses), we use:
+    SELECT * FROM expenses WHERE user_id = 1 ORDER BY date DESC
+
+This returns all expenses for user 1, sorted by date in descending order 
+(most recent first).
+
+To get summary data, we use aggregate functions:
+    SELECT SUM(amount) as total FROM expenses WHERE user_id = 1
+
+This calculates the total amount spent by adding up all expense amounts.
+
+How Filtering Works
+-------------------
+
+Filtering allows us to get exactly the data we need. The application 
+builds queries dynamically based on user input:
+
+For date range filtering:
+    SELECT * FROM expenses 
+    WHERE user_id = 1 
+    AND date >= '2024-01-01' 
+    AND date <= '2024-01-31'
+
+This gets all expenses in January 2024.
+
+For category filtering:
+    SELECT * FROM expenses 
+    WHERE user_id = 1 
+    AND category = 'Food & Dining'
+
+This gets only food-related expenses.
+
+Multiple filters can be combined using AND:
+    SELECT * FROM expenses 
+    WHERE user_id = 1 
+    AND category = 'Food & Dining'
+    AND amount > 500
+    AND date >= '2024-01-01'
+
+The database layer in db.py builds these queries safely by using 
+parameterized queries, preventing any possibility of SQL injection.
+
+How User-Specific Data Isolation Works
+---------------------------------------
+
+Security is critical - users should only see their own data. This is 
+achieved through a consistent pattern:
+
+Every query that fetches user data includes a WHERE clause filtering 
+by user_id:
+
+    SELECT * FROM expenses WHERE user_id = ?
+
+The ? is replaced with the actual user ID from the session. This 
+ensures that even if someone tries to manipulate the application, 
+they can only access data belonging to the logged-in user.
+
+For example, when fetching expenses:
+1. The page code calls db.get_user_expenses(user_id)
+2. The user_id comes from st.session_state.user['user_id']
+3. The query always includes "WHERE user_id = ?"
+4. The database returns only that user's expenses
+
+This isolation is enforced at the database level, not just in the 
+application code, providing strong security.
+
+================================================================================
+4. CRUD OPERATIONS
+================================================================================
+
+CRUD stands for Create, Read, Update, and Delete - the four basic 
+operations for managing data.
+
+Create Operations
+-----------------
+
+Creating a new user:
+When someone registers, we insert their information:
+    INSERT INTO users (username, password_hash, email, mobile)
+    VALUES (?, ?, ?, ?)
+
+The password is hashed before being stored, so the actual password 
+never enters the database.
+
+Creating an expense:
+    INSERT INTO expenses (user_id, amount, category, description, date)
+    VALUES (?, ?, ?, ?, ?)
+
+The amount is converted to paise before insertion.
+
+Creating an income:
+    INSERT INTO income (user_id, amount, source, account_type, date)
+    VALUES (?, ?, ?, ?, ?)
+
+All insert operations return the ID of the newly created record, 
+which can be used for further operations.
+
+Read Operations
+---------------
+
+Reading a single record:
+    SELECT * FROM users WHERE user_id = ?
+
+Returns one row as a dictionary.
+
+Reading multiple records:
+    SELECT * FROM expenses WHERE user_id = ? ORDER BY date DESC LIMIT ?
+
+Returns a list of dictionaries.
+
+Reading with joins:
+When we need data from multiple tables, we use JOIN:
+    SELECT ba.*, mb.bank_name 
+    FROM bank_accounts ba
+    LEFT JOIN master_banks mb ON ba.bank_id = mb.bank_id
+    WHERE ba.user_id = ?
+
+This gets bank account details along with the bank's name from 
+the master_banks table.
+
+Update Operations
+-----------------
+
+Updating wallet balance after an expense:
+    UPDATE users 
+    SET wallet_balance = ? 
+    WHERE user_id = ?
+
+The new balance is calculated in the application code.
+
+Updating budget when user changes their limit:
+    UPDATE budgets 
+    SET limit_amount = ?, alert_threshold = ?
+    WHERE budget_id = ? AND user_id = ?
+
+The user_id check ensures users can only update their own budgets.
+
+Update operations return the number of rows affected, which helps 
+verify the operation was successful.
+
+Delete Operations
+-----------------
+
+Deleting a financial goal:
+    DELETE FROM financial_goals 
+    WHERE goal_id = ? AND user_id = ?
+
+Foreign key constraints with ON DELETE CASCADE automatically remove 
+related records like goal contributions.
+
+Deleting old session records:
+    DELETE FROM sessions 
+    WHERE expires_at < datetime('now')
+
+This cleanup keeps the sessions table from growing too large. Note that 
+active sessions are managed internally and are not displayed to users 
+in the settings page.
+
+All delete operations also include user_id checks to prevent 
+unauthorized deletions.
+
+================================================================================
+5. DATA FLOW
+================================================================================
+
+Understanding how data flows through the application helps explain 
+how the database interacts with the user interface.
+
+User Action → SQL Query → Database → Response Flow
+-------------------------------------------------
+
+Let me trace through an example: Adding an Expense
+
+Step 1: User Action
+The user fills out a form on the Wallet or Transactions page:
+- Amount: 500 rupees
+- Category: Food & Dining
+- Payment Mode: UPI
+- Description: Lunch at restaurant
+
+Step 2: Page Calls Service
+The page code calls the wallet service:
+    success, message, result = wallet_service.add_expense(
+        user_id=1,
+        amount=500,
+        category="Food & Dining",
+        payment_mode="UPI"
+    )
+
+Step 3: Service Prepares Data
+The wallet service:
+- Converts 500 rupees to 50000 paise
+- Validates the amount is positive
+- Starts a database transaction
+
+Step 4: Service Executes Queries
+Inside the transaction, multiple queries run:
+
+Query 1 - Check current balance:
+    SELECT wallet_balance FROM users WHERE user_id = 1
+    Returns: 1000000 paise (10000 rupees)
+
+Query 2 - Verify sufficient balance:
+    50000 <= 1000000? Yes, continue.
+
+Query 3 - Calculate new balance:
+    new_balance = 1000000 - 50000 = 950000 paise
+
+Query 4 - Update user wallet:
+    UPDATE users SET wallet_balance = 950000 WHERE user_id = 1
+
+Query 5 - Record the expense:
+    INSERT INTO expenses (user_id, amount, category, ...)
+    VALUES (1, 50000, 'Food & Dining', ...)
+
+Query 6 - Record wallet transaction:
+    INSERT INTO wallet_transactions (user_id, txn_type, amount, ...)
+    VALUES (1, 'EXPENSE', 50000, ...)
+
+Query 7 - Commit transaction:
+    All changes are saved permanently
+
+Step 5: Service Returns Result
+The service returns:
+    success: True
+    message: "Expense added successfully"
+    result: {'expense_id': 123, 'new_balance': 9500.0}
+
+Step 6: Page Updates UI
+The page displays a success message and shows the updated 
+wallet balance. Streamlit automatically refreshes to show 
+the new data.
+
+This entire flow happens in milliseconds, providing a smooth 
+user experience while ensuring data integrity through 
+transactions.
+
+================================================================================
+5B. DETAILED DATABASE OPERATIONS - QUERY BY QUERY
+================================================================================
+
+This section shows EXACT SQL queries executed for each operation,
+with line numbers from the source code.
+
+--------------------------------------------------------------------------------
+USER REGISTRATION - All Database Queries
+--------------------------------------------------------------------------------
+
+Location: services/auth_service.py → register_user() [Lines 104-149]
+
+QUERY 1: Check if username exists
+    SQL: SELECT user_id FROM users WHERE username = ?
+    Params: ('johndoe',)
+    Purpose: Prevent duplicate usernames
+
+QUERY 2: Check if email exists
+    SQL: SELECT user_id FROM users WHERE LOWER(email) = ?
+    Params: ('john@example.com',)
+    Purpose: Prevent duplicate emails
+
+QUERY 3: Check if mobile exists
+    SQL: SELECT user_id FROM users WHERE mobile = ?
+    Params: ('9876543210',)
+    Purpose: Prevent duplicate mobile numbers
+
+QUERY 4: Insert new user
+    SQL: INSERT INTO users (
+            username, password_hash, email, mobile, 
+            wallet_balance, status, created_at, failed_login_attempts
+         ) VALUES (?, ?, ?, ?, 0, 'ACTIVE', ?, 0)
+    Params: ('johndoe', '$2b$12$...', 'john@example.com', '9876543210', '2024-01-15 10:30:00')
+    Returns: new user_id (e.g., 5)
+
+QUERY 5: Log registration action
+    SQL: INSERT INTO audit_logs (
+            actor_type, actor_id, action, entity_type, entity_id, severity
+         ) VALUES (?, ?, ?, ?, ?, ?)
+    Params: ('SYSTEM', 0, 'User registered: johndoe', 'USER', 5, 'INFO')
+
+--------------------------------------------------------------------------------
+USER LOGIN - All Database Queries
+--------------------------------------------------------------------------------
+
+Location: services/auth_service.py → login_user() [Lines 151-175]
+
+QUERY 1: Find user by email
+    SQL: SELECT * FROM users WHERE LOWER(email) = ?
+    Params: ('john@example.com',)
+    Returns: User record dict with all columns
+
+QUERY 2: Update last login time (if successful)
+    SQL: UPDATE users SET last_login = ? WHERE user_id = ?
+    Params: ('2024-01-15 10:30:00', 5)
+
+QUERY 3: Update failed attempts (if failed)
+    SQL: UPDATE users SET failed_login_attempts = ? WHERE user_id = ?
+    Params: (3, 5)  # increments from 2 to 3
+
+QUERY 4: Lock account (if 5 failed attempts)
+    SQL: UPDATE users SET locked_until = ? WHERE user_id = ?
+    Params: ('2024-01-15 10:33:00', 5)  # current time + 3 minutes
+
+--------------------------------------------------------------------------------
+ADD INCOME - All Database Queries
+--------------------------------------------------------------------------------
+
+Location: services/wallet_service.py → add_income() [Lines 18-66]
+
+QUERY 1: Get current wallet balance
+    SQL: SELECT wallet_balance FROM users WHERE user_id = ?
+    Params: (1,)
+    Returns: (1000000,) - current balance in paise
+
+QUERY 2: Update wallet balance
+    SQL: UPDATE users SET wallet_balance = ? WHERE user_id = ?
+    Params: (1500000, 1)  # 1000000 + 500000 = new balance
+
+QUERY 3: Record wallet transaction
+    SQL: INSERT INTO wallet_transactions (
+            user_id, txn_type, amount, balance_after, 
+            reference_type, description, created_at
+         ) VALUES (?, 'INCOME', ?, ?, 'income', ?, ?)
+    Params: (1, 500000, 1500000, 'Salary', '2024-01-15 10:30:00')
+
+QUERY 4: If bank account (not wallet)
+    SQL: UPDATE bank_accounts SET balance = balance + ? 
+         WHERE account_id = ? AND user_id = ?
+    Params: (500000, 3, 1)  # add to bank account
+
+QUERY 5: Record bank transaction
+    SQL: INSERT INTO bank_transactions (
+            account_id, user_id, txn_type, amount, balance_after, description
+         ) VALUES (?, ?, 'CREDIT', ?, ?, ?)
+
+QUERY 6: Log income action
+    SQL: INSERT INTO audit_logs (actor_type, actor_id, action, ...) VALUES (...)
+    Params: ('USER', 1, 'Income added', 'wallet', 1, None, {'amount': 5000, 'source': 'Salary'})
+
+--------------------------------------------------------------------------------
+ADD EXPENSE - All Database Queries
+--------------------------------------------------------------------------------
+
+Location: services/wallet_service.py → add_expense()
+
+QUERY 1: Get current balance
+    SQL: SELECT wallet_balance FROM users WHERE user_id = ?
+    Params: (1,)
+
+QUERY 2: Validate sufficient balance
+    Python check: if balance < amount_paise: return error
+
+QUERY 3: Update wallet balance
+    SQL: UPDATE users SET wallet_balance = ? WHERE user_id = ?
+    Params: (950000, 1)  # 1000000 - 50000
+
+QUERY 4: Record expense
+    SQL: INSERT INTO expenses (
+            user_id, amount, category, subcategory, description,
+            payment_mode, account_type, merchant, date, created_at
+         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    Params: (1, 50000, 'Food & Dining', NULL, 'Lunch', 'UPI', 'WALLET', 'Restaurant', '2024-01-15', ...)
+
+QUERY 5: Record wallet transaction
+    SQL: INSERT INTO wallet_transactions (
+            user_id, txn_type, amount, balance_after, reference_type
+         ) VALUES (?, 'EXPENSE', ?, ?, 'expense')
+    Params: (1, -50000, 950000, 1)  # negative amount
+
+QUERY 6: Check budget (if exists)
+    SQL: SELECT * FROM budgets WHERE user_id = ? AND category = ? AND month = ? AND year = ?
+    Params: (1, 'Food & Dining', 1, 2024)
+
+QUERY 7: Calculate spent vs budget
+    SQL: SELECT SUM(amount) FROM expenses 
+         WHERE user_id = ? AND category = ? AND strftime('%m', date) = ? AND strftime('%Y', date) = ?
+    Params: (1, 'Food & Dining', '01', '2024')
+
+--------------------------------------------------------------------------------
+VIEW DASHBOARD - All Database Queries
+--------------------------------------------------------------------------------
+
+Location: services/analytics_service.py → get_user_dashboard_data()
+
+QUERY 1: Get wallet balance
+    SQL: SELECT wallet_balance FROM users WHERE user_id = ?
+    Params: (1,)
+    Returns: (460000,)
+
+QUERY 2: Get total bank balance
+    SQL: SELECT COALESCE(SUM(balance), 0) FROM bank_accounts WHERE user_id = ?
+    Params: (1,)
+    Returns: (500000,)  # Sum of all bank accounts
+
+QUERY 3: Get investment value
+    SQL: SELECT SUM(ui.units_owned * ma.current_price) 
+         FROM user_investments ui
+         JOIN market_assets ma ON ui.asset_id = ma.asset_id
+         WHERE ui.user_id = ?
+    Params: (1,)
+    Returns: (750000,)  # Total portfolio value
+
+QUERY 4: Get monthly income
+    SQL: SELECT COALESCE(SUM(amount), 0) FROM income 
+         WHERE user_id = ? 
+         AND strftime('%m', date) = ? 
+         AND strftime('%Y', date) = ?
+    Params: (1, '01', '2024')
+    Returns: (500000,)  # ₹5,000 income
+
+QUERY 5: Get monthly expenses
+    SQL: SELECT COALESCE(SUM(amount), 0) FROM expenses 
+         WHERE user_id = ? 
+         AND strftime('%m', date) = ? 
+         AND strftime('%Y', date) = ?
+    Params: (1, '01', '2024')
+    Returns: (50000,)  # ₹500 expenses
+
+QUERY 6: Get recent transactions
+    SQL: SELECT * FROM (
+            SELECT expense_id as id, amount, category, date, 'expense' as type
+            FROM expenses WHERE user_id = ?
+            UNION ALL
+            SELECT income_id as id, amount, source as category, date, 'income' as type
+            FROM income WHERE user_id = ?
+         ) ORDER BY date DESC LIMIT 5
+    Params: (1, 1)
+    Returns: List of recent transactions
+
+QUERY 7: Get budget statuses
+    SQL: SELECT b.*, 
+         COALESCE(SUM(e.amount), 0) as spent
+         FROM budgets b
+         LEFT JOIN expenses e ON b.user_id = e.user_id 
+         AND b.category = e.category
+         AND strftime('%m', e.date) = strftime('%m', 'now')
+         AND strftime('%Y', e.date) = strftime('%Y', 'now')
+         WHERE b.user_id = ?
+         GROUP BY b.budget_id
+    Params: (1,)
+
+--------------------------------------------------------------------------------
+BUY INVESTMENT - All Database Queries
+--------------------------------------------------------------------------------
+
+Location: services/investment_service.py → buy_asset()
+
+QUERY 1: Get current asset price
+    SQL: SELECT * FROM market_assets WHERE asset_id = ?
+    Params: (1,)  # Bitcoin
+    Returns: {'asset_id': 1, 'asset_name': 'Bitcoin', 'current_price': 50000000, ...}
+
+QUERY 2: Check wallet balance
+    SQL: SELECT wallet_balance FROM users WHERE user_id = ?
+    Params: (1,)
+
+QUERY 3: Deduct from wallet
+    SQL: UPDATE users SET wallet_balance = wallet_balance - ? WHERE user_id = ?
+    Params: (500000, 1)  # ₹5,000 worth
+
+QUERY 4: Check if already owned
+    SQL: SELECT * FROM user_investments WHERE user_id = ? AND asset_id = ?
+    Params: (1, 1)
+
+QUERY 5a: If new purchase - INSERT
+    SQL: INSERT INTO user_investments (
+            user_id, asset_id, units_owned, buy_price, invested_amount, purchase_date
+         ) VALUES (?, ?, ?, ?, ?, ?)
+    Params: (1, 1, 0.01, 50000000, 500000, '2024-01-15')
+
+QUERY 5b: If already owned - UPDATE
+    SQL: UPDATE user_investments 
+         SET units_owned = units_owned + ?,
+             invested_amount = invested_amount + ?,
+             buy_price = (invested_amount + ?) / (units_owned + ?)
+         WHERE user_id = ? AND asset_id = ?
+    Params: (0.01, 500000, 500000, 0.01, 1, 1)
+
+QUERY 6: Record transaction
+    SQL: INSERT INTO investment_transactions (
+            user_id, asset_id, txn_type, units, price_per_unit, total_amount, created_at
+         ) VALUES (?, ?, 'BUY', ?, ?, ?, ?)
+    Params: (1, 1, 0.01, 50000000, 500000, '2024-01-15 10:30:00')
+
+--------------------------------------------------------------------------------
+SELL INVESTMENT - All Database Queries
+--------------------------------------------------------------------------------
+
+Location: services/investment_service.py → sell_asset()
+
+QUERY 1: Get current holding
+    SQL: SELECT * FROM user_investments WHERE user_id = ? AND asset_id = ?
+    Params: (1, 1)
+    Returns: {'units_owned': 0.01, 'buy_price': 50000000, 'invested_amount': 500000}
+
+QUERY 2: Validate sufficient units
+    Python: if units > holding['units_owned']: return error
+
+QUERY 3: Get current market price
+    SQL: SELECT current_price FROM market_assets WHERE asset_id = ?
+    Params: (1,)
+
+QUERY 4: Calculate proceeds
+    proceeds = units * current_price = 0.01 * 60000000 = 600000 (₹6,000)
+    profit = proceeds - (units * buy_price) = 600000 - 500000 = 100000 (₹1,000)
+
+QUERY 5: Add to wallet
+    SQL: UPDATE users SET wallet_balance = wallet_balance + ? WHERE user_id = ?
+    Params: (600000, 1)
+
+QUERY 6: Update holding
+    SQL: UPDATE user_investments 
+         SET units_owned = units_owned - ?,
+             invested_amount = invested_amount - ?
+         WHERE user_id = ? AND asset_id = ?
+    Params: (0.01, 500000, 1, 1)
+
+QUERY 7: Delete if no units left
+    SQL: DELETE FROM user_investments WHERE units_owned <= 0
+
+QUERY 8: Record transaction
+    SQL: INSERT INTO investment_transactions (
+            user_id, asset_id, txn_type, units, price_per_unit, total_amount, profit_loss
+         ) VALUES (?, ?, 'SELL', ?, ?, ?, ?)
+    Params: (1, 1, 'SELL', 0.01, 60000000, 600000, 100000)
+
+================================================================================
+6. SECURITY
+================================================================================
+
+The database implements multiple security measures to protect user data.
+
+Parameterized Queries
+--------------------
+
+The most important security measure is using parameterized queries 
+everywhere. Instead of building SQL strings with user input:
+
+BAD (vulnerable to SQL injection):
+    query = "SELECT * FROM users WHERE email = '" + email + "'"
+
+GOOD (safe):
+    query = "SELECT * FROM users WHERE email = ?"
+    db.execute(query, (email,))
+
+The parameterized approach ensures that user input is always treated 
+as data, never as executable SQL code. Even if someone tries to 
+enter malicious SQL in the email field, it will be escaped properly.
+
+All database operations in the application use this approach:
+- INSERT statements with ? placeholders
+- UPDATE statements with ? placeholders  
+- DELETE statements with ? placeholders
+- SELECT statements with ? placeholders
+
+This eliminates SQL injection vulnerabilities completely.
+
+Ownership Checks
+---------------
+
+Every query that accesses user-specific data includes ownership 
+verification:
+
+To fetch a bank account:
+    SELECT * FROM bank_accounts 
+    WHERE account_id = ? AND user_id = ?
+
+The account_id identifies the account, but the user_id ensures 
+the requesting user actually owns that account.
+
+To update an expense:
+    UPDATE expenses 
+    SET amount = ?, category = ?
+    WHERE expense_id = ? AND user_id = ?
+
+Even if someone tries to modify another user's expense by guessing 
+the expense_id, the query will fail because the user_id won't match.
+
+These ownership checks are added at the database layer, making 
+them impossible to bypass.
+
+Additional Security Features
+----------------------------
+
+Foreign key constraints ensure data integrity and prevent orphaned 
+records. When a user is deleted, all their related data (expenses, 
+income, investments, etc.) is automatically deleted thanks to 
+ON DELETE CASCADE.
+
+Indexing on sensitive columns (email, user_id) makes queries fast 
+while still maintaining security.
+
+Audit logging records all significant actions, enabling detection 
+of any suspicious activity.
+
+================================================================================
+7. CONCLUSION
+================================================================================
+
+Why the Database Design Is Efficient
+------------------------------------
+
+The database design of this Smart Finance Tracker is efficient for 
+several reasons:
+
+1. Normalized Structure
+The data is properly organized into related tables, avoiding 
+duplication. User information is stored once in the users table, 
+and referenced by ID in other tables. This saves storage space 
+and ensures consistency.
+
+2. Appropriate Indexing
+Important columns that are frequently searched (user_id, email, 
+date, category) have indexes. This makes data retrieval fast, 
+even with thousands of records.
+
+3. Transaction Support
+Using database transactions ensures that related operations 
+either all succeed or all fail. This prevents data corruption 
+when adding expenses and updating balances.
+
+4. Paise Storage
+Using integers for all monetary values ensures exact calculations 
+with no floating-point errors, which is essential for financial 
+applications.
+
+5. Security by Design
+Parameterized queries and ownership checks are built into every 
+database operation, providing strong protection against common 
+vulnerabilities.
+
+6. Scalability
+While SQLite is designed for single-user applications, the 
+structure can easily be migrated to larger databases like 
+PostgreSQL if needed in the future.
+
+This database design provides a solid foundation for a reliable, 
+secure, and performant finance tracking application.
+
+================================================================================
+END OF DATABASE EXPLANATION
+================================================================================

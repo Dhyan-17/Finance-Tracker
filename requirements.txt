@@ -1,0 +1,27 @@
+# Smart Finance Tracker - Requirements
+# Python 3.9+
+
+# Core Framework
+streamlit>=1.28.0
+
+# Database
+# SQLite3 is built-in with Python
+
+# Authentication
+bcrypt>=4.0.0
+
+# Data Processing
+pandas>=2.0.0
+numpy>=1.24.0
+
+# Visualization
+plotly>=5.18.0
+
+# HTTP Client (for potential API integrations)
+requests>=2.31.0
+
+# Date/Time
+python-dateutil>=2.8.0
+
+# Environment Variables (optional)
+python-dotenv>=1.0.0
