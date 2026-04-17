@@ -1,8 +1,8 @@
 [theme]
-primaryColor = "#667eea"
-backgroundColor = "#ffffff"
-secondaryBackgroundColor = "#f0f2f6"
-textColor = "#262730"
+primaryColor = "#5B8DEF"
+backgroundColor = "#F8F9FB"
+secondaryBackgroundColor = "#FFFFFF"
+textColor = "#1A1A2E"
 font = "sans serif"
 
 [server]
@@ -13,8 +13,6 @@ enableXsrfProtection = true
 
 [browser]
 gatherUsageStats = false
-serverAddress = "localhost"
-serverPort = 8501
 
 [runner]
 magicEnabled = true
